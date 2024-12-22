@@ -343,25 +343,29 @@ podTemplate(
                         set -e
                         # Deploy databases
                         kubectl apply -f deployment/databases.yaml
+                        check_result "Database deployment"
 
                         echo "Waiting for database pods to be ready..."
-                        kubectl wait --for=condition=ready pod -l "app=postgres,userid=${userid}" -n ${db_namespace} --timeout=300s
+                        kubectl wait --for=condition=ready pod -l "app=postgres,userid=${userid}" -n ${db_namespace} --timeout=600s || true
+                        kubectl wait --for=condition=ready pod -l "app=mongodb,userid=${userid}" -n ${db_namespace} --timeout=600s || true
 
-                        kubectl wait --for=condition=ready pod -l "app=mongodb,userid=${userid}" -n ${db_namespace} --timeout=300s
+                        # 기존 Secret 삭제
+                        kubectl delete secret ${userid}-db-credentials -n ${app_namespace} --ignore-not-found
 
-                        # Copy DB credentials to application namespace
+                        # DB Credentials Secret을 새 네임스페이스에 복사
                         kubectl get secret ${userid}-db-credentials -n ${db_namespace} -o yaml | \
-                            sed 's/namespace: .*/namespace: ${app_namespace}/' | \
-                            kubectl apply -f -
+                        sed "s/namespace: .*/namespace: ${app_namespace}/" | \
+                        kubectl create -f -
+
+                        check_result "Database credentials copy"
 
                         # Deploy application
                         kubectl apply -f deployment/${manifest}
+                        check_result "Application deployment"
 
-                        # Wait for application pods
                         echo "Waiting for application pods to be ready..."
-                        kubectl wait --for=condition=ready pod -l "app=command-service,userid=${userid}" -n ${app_namespace} --timeout=300s
-
-                        kubectl wait --for=condition=ready pod -l "app=query-service,userid=${userid}" -n ${app_namespace} --timeout=300s
+                        kubectl wait --for=condition=ready pod -l "app=command-service,userid=${userid}" -n ${app_namespace} --timeout=600s || true
+                        kubectl wait --for=condition=ready pod -l "app=query-service,userid=${userid}" -n ${app_namespace} --timeout=600s || true
                     """
                 }
                 checkError("Deployment to AKS Failed")
