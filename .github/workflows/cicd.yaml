@@ -2,7 +2,10 @@
 name: CI/CD Pipeline
 
 on:
-
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       USERID:
@@ -12,10 +15,10 @@ on:
 
 env:
   USERID: ondal
-  REGISTRY: ${{ github.event.inputs.USERID }}cr.azurecr.io
+  REGISTRY: ${{ env.USERID }}cr.azurecr.io
   IMAGE_ORG: telecom
-  DB_NAMESPACE: ${{ github.event.inputs.USERID }}-database
-  APP_NAMESPACE: ${{ github.event.inputs.USERID }}-application
+  DB_NAMESPACE: ${{ env.USERID }}-database
+  APP_NAMESPACE: ${{ env.USERID }}-application
   LOCATION: koreacentral
   RESOURCE_GROUP: tiu-dgga-rg
 
@@ -38,7 +41,7 @@ jobs:
         uses: azure/aks-set-context@v3
         with:
           resource-group: ${{ env.RESOURCE_GROUP }}
-          cluster-name: ${{ github.event.inputs.USERID }}-aks
+          cluster-name: ${{ env.USERID }}-aks
 
       - name: Create Namespaces
         run: |
@@ -50,14 +53,14 @@ jobs:
         run: |
           # Storage Account
           az storage account create \
-            --name ${{ github.event.inputs.USERID }}storage \
+            --name ${{ env.USERID }}storage \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --location ${{ env.LOCATION }} \
             --sku Standard_LRS \
             --only-show-errors || true
           
           STORAGE_CONNECTION=$(az storage account show-connection-string \
-            --name ${{ github.event.inputs.USERID }}storage \
+            --name ${{ env.USERID }}storage \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --query connectionString \
             --output tsv)
@@ -66,25 +69,25 @@ jobs:
           
           # Create container
           az storage container create \
-            --name ${{ github.event.inputs.USERID }}-eventhub-checkpoints \
+            --name ${{ env.USERID }}-eventhub-checkpoints \
             --connection-string "$STORAGE_CONNECTION" || true
           
           # Event Hubs
           az eventhubs namespace create \
-            --name ${{ github.event.inputs.USERID }}-eventhub-plan-ns \
+            --name ${{ env.USERID }}-eventhub-plan-ns \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --location ${{ env.LOCATION }} \
             --sku Basic || true
           
           az eventhubs namespace create \
-            --name ${{ github.event.inputs.USERID }}-eventhub-usage-ns \
+            --name ${{ env.USERID }}-eventhub-usage-ns \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --location ${{ env.LOCATION }} \
             --sku Basic || true
           
           az eventhubs eventhub create \
             --name phone-plan-events-plan \
-            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-plan-ns \
+            --namespace-name ${{ env.USERID }}-eventhub-plan-ns \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --partition-count 1 \
             --cleanup-policy Delete \
@@ -92,7 +95,7 @@ jobs:
           
           az eventhubs eventhub create \
             --name phone-plan-events-usage \
-            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-usage-ns \
+            --namespace-name ${{ env.USERID }}-eventhub-usage-ns \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --partition-count 1 \
             --cleanup-policy Delete \
@@ -101,13 +104,13 @@ jobs:
           # Get connection strings
           PLAN_CONNECTION=$(az eventhubs namespace authorization-rule keys list \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-plan-ns \
+            --namespace-name ${{ env.USERID }}-eventhub-plan-ns \
             --name RootManageSharedAccessKey \
             --query primaryConnectionString -o tsv)
           
           USAGE_CONNECTION=$(az eventhubs namespace authorization-rule keys list \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-usage-ns \
+            --namespace-name ${{ env.USERID }}-eventhub-usage-ns \
             --name RootManageSharedAccessKey \
             --query primaryConnectionString -o tsv)
           
@@ -155,12 +158,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Login to Azure Container Registry
-        uses: docker/login-action@v2
+      - name: Azure Login
+        uses: azure/login@v1
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login -n ${{ env.USERID }}cr
 
       - name: Get current date
         id: date
@@ -201,7 +206,11 @@ jobs:
         uses: azure/aks-set-context@v3
         with:
           resource-group: ${{ env.RESOURCE_GROUP }}
-          cluster-name: ${{ github.event.inputs.USERID }}-aks
+          cluster-name: ${{ env.USERID }}-aks
+
+      - name: Grant AKS access to ACR
+        run: |
+          az aks update -n ${{ env.USERID }}-aks -g ${{ env.RESOURCE_GROUP }} --attach-acr ${{ env.USERID }}cr
 
       - name: Get current date
         id: date
@@ -228,7 +237,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           MONGODB_PASSWORD: ${{ secrets.MONGODB_PASSWORD }}
         run: |
-          export userid=${{ github.event.inputs.USERID }}
+          export userid=${{ env.USERID }}
           export db_namespace=${{ env.DB_NAMESPACE }}
           export postgres_password_base64=$(echo -n "$POSTGRES_PASSWORD" | base64)
           export mongo_password_base64=$(echo -n "$MONGODB_PASSWORD" | base64)
@@ -242,7 +251,7 @@ jobs:
 
       - name: Deploy Applications
         run: |
-          export userid=${{ github.event.inputs.USERID }}
+          export userid=${{ env.USERID }}
           export app_namespace=${{ env.APP_NAMESPACE }}
           export image_tag=${{ steps.date.outputs.date }}
           export command_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ steps.date.outputs.date }}
@@ -258,12 +267,12 @@ jobs:
       - name: Verify Deployment
         run: |
           echo "Waiting for pods to be ready..."
-          kubectl wait --for=condition=ready pod -l "app=command-service,userid=${{ github.event.inputs.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
-          kubectl wait --for=condition=ready pod -l "app=query-service,userid=${{ github.event.inputs.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
+          kubectl wait --for=condition=ready pod -l "app=command-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
+          kubectl wait --for=condition=ready pod -l "app=query-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
           
           echo "Getting service endpoints..."
-          COMMAND_IP=$(kubectl get svc ${{ github.event.inputs.USERID }}-cqrs-command -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          QUERY_IP=$(kubectl get svc ${{ github.event.inputs.USERID }}-cqrs-query -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          COMMAND_IP=$(kubectl get svc ${{ env.USERID }}-cqrs-command -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          QUERY_IP=$(kubectl get svc ${{ env.USERID }}-cqrs-query -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           
           echo "Command Service IP: $COMMAND_IP"
           echo "Query Service IP: $QUERY_IP"
