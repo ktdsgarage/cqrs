@@ -1,5 +1,16 @@
 def PIPELINE_ID = "cqrs-${env.BUILD_NUMBER}"
 
+// Pipeline Parameters
+properties([
+    parameters([
+        string(
+            name: 'USERID',
+            defaultValue: 'ondal',
+            description: 'User ID for resource naming (lowercase letters and numbers only)'
+        )
+    ])
+])
+
 // Image 태그 생성 함수
 def getImageTag() {
     def dateFormat = new java.text.SimpleDateFormat('yyyyMMddHHmmss')
@@ -47,7 +58,7 @@ spec:
     node(PIPELINE_ID) {
         // Global variables
         def props
-        def userid
+        def userid = params.USERID  // 파라미터에서 userid 가져오기
         def db_namespace
         def app_namespace
         def imageReg
@@ -60,11 +71,18 @@ spec:
         def storageConnectionString = ""
 
         stage("Get Source") {
+            // userid 검증
+            if (!userid?.trim()) {
+                error "USERID parameter is required"
+            }
+            if (!(userid ==~ /^[a-z0-9]+$/)) {
+                error "USERID must contain only lowercase letters and numbers"
+            }
+
             checkout scm
             props = readProperties file: "deployment/deploy_env_vars"
 
             // Variables initialization with null checks
-            userid = props["userid"] ?: error("userid not found in deploy_env_vars")
             db_namespace = "${userid}-database"
             app_namespace = "${userid}-application"
             imageReg = "${userid}cr.azurecr.io"

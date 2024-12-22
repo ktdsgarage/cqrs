@@ -1,22 +1,14 @@
 # Application Settings
 application_name=cqrs
-app_namespace=${userid}-application
-db_namespace=${userid}-database
 resource_group=tiu-dgga-rg
 location=koreacentral
-aks_name=${userid}-aks
-acr_name=${userid}cr
 
 # Image Settings
-image_reg=${userid}cr.azurecr.io
 image_org=telecom
 image_credential=acr-credentials
 
 # Event Grid & Storage Settings
-event_hub_ns=${userid}-eventhub-ns
 event_hub_name=phone-plan-events
-storage_account=${userid}storage
-blob_container=eventhub-checkpoints
 
 # Database Settings
 postgres_db=telecomdb
