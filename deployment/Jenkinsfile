@@ -1,6 +1,4 @@
 def PIPELINE_ID = "cqrs-${env.BUILD_NUMBER}"
-def NFS_HOST = "10.17.0.133"
-def NFS_DIR = "data/nfs"
 
 // Image 태그 생성 함수
 def getImageTag() {
@@ -19,7 +17,13 @@ podTemplate(
         containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
     ],
     volumes: [
-        nfsVolume(mountPath: "/home/gradle/.gradle", serverAddress: "${NFS_HOST}", serverPath: "/${NFS_DIR}/gradle/cqrs", readOnly: false)
+        // Jenkins 워크스페이스를 공유
+        emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
+        persistentVolumeClaim(
+            mountPath: '/home/jenkins/agent',
+            claimName: 'jenkins-workspace-pvc',  // Jenkins PVC 이름
+            readOnly: false
+        )
     ]
 ) {
     node(PIPELINE_ID) {
