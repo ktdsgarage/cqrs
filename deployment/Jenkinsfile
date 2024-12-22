@@ -320,8 +320,12 @@ podTemplate(
 
                         # Generate deployment files
                         envsubst < deployment/${manifest}.template > deployment/${manifest}
+                        echo "##### Application manifest #####"
+                        cat deployment/${manifest}
 
                         envsubst < deployment/databases.yaml.template > deployment/databases.yaml
+                        echo "##### Database manifest #####"
+                        cat deployment/databases.yaml
 
                         # Verify generated files
                         if [ ! -s deployment/${manifest} ] || [ ! -s deployment/databases.yaml ]; then
