@@ -1,133 +1,139 @@
 apiVersion: v1
 kind: Secret
 metadata:
- name: db-credentials
- namespace: ${namespace}
+  name: ${userid}-db-credentials
+  namespace: ${db_namespace}
 type: Opaque
 data:
- postgres-password: ${postgres_password_base64}
- mongo-password: ${mongo_password_base64}
+  postgres-password: ${postgres_password_base64}
+  mongo-password: ${mongo_password_base64}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
- name: postgres
- namespace: ${namespace}
+  name: ${userid}-postgres
+  namespace: ${db_namespace}
 spec:
- serviceName: postgres
- replicas: 1
- selector:
-   matchLabels:
-     app: postgres
- template:
-   metadata:
-     labels:
-       app: postgres
-   spec:
-     containers:
-     - name: postgres
-       image: postgres:15
-       env:
-       - name: POSTGRES_DB
-         value: ${postgres_db}
-       - name: POSTGRES_USER
-         value: ${postgres_user}
-       - name: POSTGRES_PASSWORD
-         valueFrom:
-           secretKeyRef:
-             name: db-credentials
-             key: postgres-password
-       ports:
-       - containerPort: 5432
-       volumeMounts:
-       - name: postgres-data
-         mountPath: /var/lib/postgresql/data
-       resources:
-         requests:
-           cpu: ${resources_requests_cpu}
-           memory: ${resources_requests_memory}
-         limits:
-           cpu: ${resources_limits_cpu}
-           memory: ${resources_limits_memory}
- volumeClaimTemplates:
- - metadata:
-     name: postgres-data
-   spec:
-     accessModes: [ "ReadWriteOnce" ]
-     resources:
-       requests:
-         storage: 10Gi
+  serviceName: "${userid}-postgres"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      userid: ${userid}
+  template:
+    metadata:
+      labels:
+        app: postgres
+        userid: ${userid}
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        env:
+        - name: POSTGRES_DB
+          value: ${postgres_db}
+        - name: POSTGRES_USER
+          value: ${postgres_user}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ${userid}-db-credentials
+              key: postgres-password
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            cpu: ${resources_requests_cpu}
+            memory: ${resources_requests_memory}
+          limits:
+            cpu: ${resources_limits_cpu}
+            memory: ${resources_limits_memory}
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
- name: postgres
- namespace: ${namespace}
+  name: ${userid}-postgres
+  namespace: ${db_namespace}
 spec:
- selector:
-   app: postgres
- ports:
- - port: 5432
- type: ClusterIP
+  selector:
+    app: postgres
+    userid: ${userid}
+  ports:
+  - port: 5432
+  type: ClusterIP
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
- name: mongodb
- namespace: ${namespace}
+  name: ${userid}-mongodb
+  namespace: ${db_namespace}
 spec:
- serviceName: mongodb
- replicas: 1
- selector:
-   matchLabels:
-     app: mongodb
- template:
-   metadata:
-     labels:
-       app: mongodb
-   spec:
-     containers:
-     - name: mongodb
-       image: mongo:6
-       env:
-       - name: MONGO_INITDB_DATABASE
-         value: ${mongodb_db}
-       - name: MONGO_INITDB_ROOT_USERNAME
-         value: ${mongodb_user}
-       - name: MONGO_INITDB_ROOT_PASSWORD
-         valueFrom:
-           secretKeyRef:
-             name: db-credentials
-             key: mongo-password
-       ports:
-       - containerPort: 27017
-       volumeMounts:
-       - name: mongodb-data
-         mountPath: /data/db
-       resources:
-         requests:
-           cpu: ${resources_requests_cpu}
-           memory: ${resources_requests_memory}
-         limits:
-           cpu: ${resources_limits_cpu}
-           memory: ${resources_limits_memory}
- volumeClaimTemplates:
- - metadata:
-     name: mongodb-data
-   spec:
-     accessModes: [ "ReadWriteOnce" ]
-     resources:
-       requests:
-         storage: 10Gi
+  serviceName: "${userid}-mongodb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+      userid: ${userid}
+  template:
+    metadata:
+      labels:
+        app: mongodb
+        userid: ${userid}
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:6
+        env:
+        - name: MONGO_INITDB_DATABASE
+          value: ${mongodb_db}
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: ${mongodb_user}
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ${userid}-db-credentials
+              key: mongo-password
+        ports:
+        - containerPort: 27017
+        volumeMounts:
+        - name: mongodb-data
+          mountPath: /data/db
+        resources:
+          requests:
+            cpu: ${resources_requests_cpu}
+            memory: ${resources_requests_memory}
+          limits:
+            cpu: ${resources_limits_cpu}
+            memory: ${resources_limits_memory}
+  volumeClaimTemplates:
+  - metadata:
+      name: mongodb-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
- name: mongodb
- namespace: ${namespace}
+  name: ${userid}-mongodb
+  namespace: ${db_namespace}
 spec:
- selector:
-   app: mongodb
- ports:
- - port: 27017
- type: ClusterIP
+  selector:
+    app: mongodb
+    userid: ${userid}
+  ports:
+  - port: 27017
+  type: ClusterIP

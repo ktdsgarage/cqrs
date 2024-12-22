@@ -7,6 +7,13 @@ def getImageTag() {
     return dateFormat.format(currentDate)
 }
 
+// 에러 체크 함수
+def checkError(message) {
+    if (currentBuild.result == "FAILURE") {
+        error "Failed: ${message}"
+    }
+}
+
 podTemplate(
     label: "${PIPELINE_ID}",
     containers: [
@@ -21,7 +28,7 @@ podTemplate(
                 envVar(key: 'HOME', value: '/home/jenkins')
             ]
         ),
-        containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl', command: 'cat', ttyEnabled: true),
+        containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl:latest', command: 'cat', ttyEnabled: true),
         containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
     ],
     volumes: [
@@ -38,23 +45,31 @@ spec:
 """
 ) {
     node(PIPELINE_ID) {
+        // Global variables
         def props
-        def applicationName
-        def namespace
+        def userid
+        def db_namespace
+        def app_namespace
         def imageReg
         def imageOrg
         def imageTag = getImageTag()
         def imageCredential
         def manifest = "deploy.yaml"
+        def planConnectionString = ""
+        def usageConnectionString = ""
+        def storageConnectionString = ""
 
         stage("Get Source") {
             checkout scm
             props = readProperties file: "deployment/deploy_env_vars"
-            applicationName = props["application_name"]
-            namespace = props["namespace"]
-            imageReg = props["image_reg"]
-            imageOrg = props["image_org"]
-            imageCredential = props["image_credential"]
+
+            // Variables initialization with null checks
+            userid = props["userid"] ?: error("userid not found in deploy_env_vars")
+            db_namespace = "${userid}-database"
+            app_namespace = "${userid}-application"
+            imageReg = "${userid}cr.azurecr.io"
+            imageOrg = props["image_org"] ?: "telecom"
+            imageCredential = props["image_credential"] ?: error("image_credential not found")
         }
 
         try {
@@ -62,43 +77,172 @@ spec:
                 container('azure-cli') {
                     withCredentials([azureServicePrincipal('azure-credentials')]) {
                         sh """
+                            set -e
                             mkdir -p ~/.azure
                             az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID
-                            az aks get-credentials --resource-group ${props.resource_group} --name ${props.aks_name}
+                            az aks get-credentials --resource-group ${props.resource_group} --name ${userid}-aks --overwrite-existing
                         """
                     }
                 }
+                checkError("AKS Setup Failed")
+            }
+
+            stage("Create Namespaces") {
+                container('kubectl') {
+                    sh """
+                        set -e
+                        kubectl create namespace ${db_namespace} --dry-run=client -o yaml | kubectl apply -f -
+                        kubectl create namespace ${app_namespace} --dry-run=client -o yaml | kubectl apply -f -
+                    """
+                }
+                checkError("Namespace Creation Failed")
             }
 
             stage("Setup Event Hub & Storage") {
                 container('azure-cli') {
                     sh """
-                        az eventhubs namespace create --name ${props.event_hub_ns} \
-                            --resource-group ${props.resource_group} \
-                            --location ${props.location} \
-                            --sku Basic || true
+                        set -e
 
-                        az eventhubs eventhub create --name ${props.event_hub_name} \
-                            --namespace-name ${props.event_hub_ns} \
+                        # Function to check command result
+                        check_result() {
+                            if [ \$? -ne 0 ]; then
+                                echo "Error: \$1 failed"
+                                exit 1
+                            fi
+                        }
+
+                        # Storage Account Setup
+                        STORAGE_EXISTS=\$(az storage account show \
+                            --name ${userid}storage \
+                            --resource-group ${props.resource_group} \
+                            --query name \
+                            --output tsv 2>/dev/null || echo "")
+
+                        if [ -z "\$STORAGE_EXISTS" ]; then
+                            az storage account create \
+                                --name ${userid}storage \
+                                --resource-group ${props.resource_group} \
+                                --location ${props.location} \
+                                --sku Standard_LRS
+                            check_result "Storage Account creation"
+                        fi
+
+                        # Get Storage connection string
+                        STORAGE_CONNECTION_STRING=\$(az storage account show-connection-string \
+                            --name ${userid}storage \
+                            --resource-group ${props.resource_group} \
+                            --query connectionString \
+                            --output tsv)
+                        check_result "Get Storage connection string"
+                        echo "\$STORAGE_CONNECTION_STRING" > storage_connection_string.txt
+
+                        # Create Blob Container
+                        az storage container create \
+                            --name ${userid}-eventhub-checkpoints \
+                            --connection-string "\$STORAGE_CONNECTION_STRING" || true
+
+                        # Plan Event Hub Setup
+                        PLAN_NS_EXISTS=\$(az eventhubs namespace show \
+                            --name ${userid}-eventhub-plan-ns \
+                            --resource-group ${props.resource_group} \
+                            --query name --output tsv 2>/dev/null || echo "")
+
+                        if [ -z "\$PLAN_NS_EXISTS" ]; then
+                            az eventhubs namespace create \
+                                --name ${userid}-eventhub-plan-ns \
+                                --resource-group ${props.resource_group} \
+                                --location ${props.location} \
+                                --sku Basic
+                            check_result "Plan Event Hub Namespace creation"
+                        fi
+
+                        # Usage Event Hub Setup
+                        USAGE_NS_EXISTS=\$(az eventhubs namespace show \
+                            --name ${userid}-eventhub-usage-ns \
+                            --resource-group ${props.resource_group} \
+                            --query name --output tsv 2>/dev/null || echo "")
+
+                        if [ -z "\$USAGE_NS_EXISTS" ]; then
+                            az eventhubs namespace create \
+                                --name ${userid}-eventhub-usage-ns \
+                                --resource-group ${props.resource_group} \
+                                --location ${props.location} \
+                                --sku Basic
+                            check_result "Usage Event Hub Namespace creation"
+                        fi
+
+                        # Create Event Hubs
+                        az eventhubs eventhub create \
+                            --name phone-plan-events-plan \
+                            --namespace-name ${userid}-eventhub-plan-ns \
                             --resource-group ${props.resource_group} \
                             --partition-count 1 || true
 
-                        az storage account create --name ${props.storage_account} \
+                        az eventhubs eventhub create \
+                            --name phone-plan-events-usage \
+                            --namespace-name ${userid}-eventhub-usage-ns \
                             --resource-group ${props.resource_group} \
-                            --location ${props.location} \
-                            --sku Standard_LRS || true
+                            --partition-count 1 || true
+
+                        # Get connection strings
+                        PLAN_CONNECTION_STRING=\$(az eventhubs namespace authorization-rule keys list \
+                            --resource-group ${props.resource_group} \
+                            --namespace-name ${userid}-eventhub-plan-ns \
+                            --name RootManageSharedAccessKey \
+                            --query primaryConnectionString -o tsv)
+                        check_result "Get Plan Event Hub connection string"
+                        echo "\$PLAN_CONNECTION_STRING" > plan_connection_string.txt
+
+                        USAGE_CONNECTION_STRING=\$(az eventhubs namespace authorization-rule keys list \
+                            --resource-group ${props.resource_group} \
+                            --namespace-name ${userid}-eventhub-usage-ns \
+                            --name RootManageSharedAccessKey \
+                            --query primaryConnectionString -o tsv)
+                        check_result "Get Usage Event Hub connection string"
+                        echo "\$USAGE_CONNECTION_STRING" > usage_connection_string.txt
                     """
                 }
+
+                // Read connection strings from files
+                planConnectionString = readFile('plan_connection_string.txt').trim()
+                usageConnectionString = readFile('usage_connection_string.txt').trim()
+                storageConnectionString = readFile('storage_connection_string.txt').trim()
+
+                // Create Kubernetes Secrets
+                container('kubectl') {
+                    sh """
+                        set -e
+                        kubectl create secret generic eventhub-secret \
+                            --namespace ${app_namespace} \
+                            --from-literal=plan-connection-string='${planConnectionString}' \
+                            --from-literal=usage-connection-string='${usageConnectionString}' \
+                            --from-literal=plan-hub-name='phone-plan-events-plan' \
+                            --from-literal=usage-hub-name='phone-plan-events-usage' \
+                            --from-literal=consumer-group='\$Default' \
+                            --dry-run=client -o yaml | kubectl apply -f -
+
+                        kubectl create secret generic storage-secret \
+                            --namespace ${app_namespace} \
+                            --from-literal=connection-string='${storageConnectionString}' \
+                            --dry-run=client -o yaml | kubectl apply -f -
+                    """
+                }
+                checkError("Event Hub & Storage Setup Failed")
             }
 
             stage('Build Applications') {
                 container('gradle') {
                     sh """
+                        set -e
                         chmod +x gradlew
                         ./gradlew command:clean command:build -x test
+                        check_result "Command service build"
+
                         ./gradlew query:clean query:build -x test
+                        check_result "Query service build"
                     """
                 }
+                checkError("Application Build Failed")
             }
 
             stage('Build Container Images') {
@@ -107,15 +251,21 @@ spec:
                     def queryImagePath = "${imageReg}/${imageOrg}/cqrs-query"
 
                     sh """
+                        set -e
+                        # Command Service Image
                         podman build -f deployment/Dockerfile-command \
                             -t ${commandImagePath}:${imageTag} \
                             -t ${commandImagePath}:latest .
+                        check_result "Command service image build"
 
+                        # Query Service Image
                         podman build -f deployment/Dockerfile-query \
                             -t ${queryImagePath}:${imageTag} \
                             -t ${queryImagePath}:latest .
+                        check_result "Query service image build"
                     """
                 }
+                checkError("Container Image Build Failed")
             }
 
             stage('Push Container Images') {
@@ -129,53 +279,128 @@ spec:
                         passwordVariable: 'PASSWORD'
                     )]) {
                         sh """
+                            set -e
                             podman login ${imageReg} --username \$USERNAME --password \$PASSWORD
+                            check_result "ACR login"
 
+                            # Push Command Service Images
                             podman push ${commandImagePath}:${imageTag}
-                            podman push ${commandImagePath}:latest
+                            check_result "Command service image push (tagged)"
 
+                            podman push ${commandImagePath}:latest
+                            check_result "Command service image push (latest)"
+
+                            # Push Query Service Images
                             podman push ${queryImagePath}:${imageTag}
+                            check_result "Query service image push (tagged)"
+
                             podman push ${queryImagePath}:latest
+                            check_result "Query service image push (latest)"
                         """
                     }
                 }
+                checkError("Container Image Push Failed")
             }
 
             stage('Generate Deployment YAML') {
                 container('envsubst') {
                     sh """
-                        set -a
-                        source deployment/deploy_env_vars
-                        set +a
-
+                        set -e
+                        # Set environment variables
+                        export userid=${userid}
+                        export db_namespace=${db_namespace}
+                        export app_namespace=${app_namespace}
                         export image_tag=${imageTag}
                         export command_image_path=${imageReg}/${imageOrg}/cqrs-command:${imageTag}
                         export query_image_path=${imageReg}/${imageOrg}/cqrs-query:${imageTag}
 
+                        # Load environment variables
+                        set -a
+                        source deployment/deploy_env_vars
+                        set +a
+
                         # Convert passwords to base64
                         export postgres_password_base64=\$(echo -n "${props.postgres_password}" | base64)
+                        check_result "Postgres password conversion"
+
                         export mongo_password_base64=\$(echo -n "${props.mongodb_password}" | base64)
+                        check_result "MongoDB password conversion"
 
-                        # Generate both yaml files
+                        # Generate deployment files
                         envsubst < deployment/${manifest}.template > deployment/${manifest}
-                        envsubst < deployment/databases.yaml.template > deployment/databases.yaml
+                        check_result "Main manifest generation"
 
-                        cat deployment/${manifest}
-                        cat deployment/databases.yaml
+                        envsubst < deployment/databases.yaml.template > deployment/databases.yaml
+                        check_result "Database manifest generation"
+
+                        # Verify generated files
+                        if [ ! -s deployment/${manifest} ] || [ ! -s deployment/databases.yaml ]; then
+                            echo "Error: Generated manifest files are empty"
+                            exit 1
+                        fi
                     """
                 }
+                checkError("Deployment YAML Generation Failed")
             }
 
             stage('Deploy to AKS') {
                 container('kubectl') {
                     sh """
-                        kubectl apply -f deployment/databases.yaml -n ${namespace}
-                        kubectl wait --for=condition=ready pod -l app=postgres -n ${namespace} --timeout=300s
-                        kubectl wait --for=condition=ready pod -l app=mongodb -n ${namespace} --timeout=300s
+                        set -e
+                        # Deploy databases
+                        kubectl apply -f deployment/databases.yaml
+                        check_result "Database deployment"
 
-                        kubectl apply -f deployment/${manifest} -n ${namespace}
+                        echo "Waiting for database pods to be ready..."
+                        kubectl wait --for=condition=ready pod -l "app=postgres,userid=${userid}" -n ${db_namespace} --timeout=300s
+                        check_result "Postgres pod readiness"
+
+                        kubectl wait --for=condition=ready pod -l "app=mongodb,userid=${userid}" -n ${db_namespace} --timeout=300s
+                        check_result "MongoDB pod readiness"
+
+                        # Copy DB credentials to application namespace
+                        kubectl get secret ${userid}-db-credentials -n ${db_namespace} -o yaml | \
+                            sed 's/namespace: .*/namespace: ${app_namespace}/' | \
+                            kubectl apply -f -
+                        check_result "Database credentials copy"
+
+                        # Deploy application
+                        kubectl apply -f deployment/${manifest}
+                        check_result "Application deployment"
+
+                        # Wait for application pods
+                        echo "Waiting for application pods to be ready..."
+                        kubectl wait --for=condition=ready pod -l "app=command-service,userid=${userid}" -n ${app_namespace} --timeout=300s
+                        check_result "Command service pod readiness"
+
+                        kubectl wait --for=condition=ready pod -l "app=query-service,userid=${userid}" -n ${app_namespace} --timeout=300s
+                        check_result "Query service pod readiness"
                     """
                 }
+                checkError("Deployment to AKS Failed")
+            }
+
+            stage('Verify Deployment') {
+                container('kubectl') {
+                    sh """
+                        set -e
+                        echo "Verifying service endpoints..."
+
+                        # Get service IPs
+                        COMMAND_IP=\$(kubectl get svc ${userid}-cqrs-command -n ${app_namespace} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+                        QUERY_IP=\$(kubectl get svc ${userid}-cqrs-query -n ${app_namespace} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+                        echo "Command Service IP: \$COMMAND_IP"
+                        echo "Query Service IP: \$QUERY_IP"
+
+                        # Verify both IPs are set
+                        if [ -z "\$COMMAND_IP" ] || [ -z "\$QUERY_IP" ]; then
+                            echo "Error: Service IPs not available"
+                            exit 1
+                        fi
+                    """
+                }
+                checkError("Deployment Verification Failed")
             }
 
             currentBuild.result = 'SUCCESS'
@@ -183,7 +408,11 @@ spec:
 
         } catch(e) {
             currentBuild.result = "FAILED"
+            echo "**** ERROR: ${e.getMessage()}"
             throw e
+        } finally {
+            // Cleanup temporary files
+            sh "rm -f plan_connection_string.txt usage_connection_string.txt storage_connection_string.txt"
         }
     }
 }

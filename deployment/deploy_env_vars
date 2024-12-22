@@ -1,26 +1,33 @@
+# Application Settings
 application_name=cqrs
-namespace=cqrs
+app_namespace=${userid}-application
+db_namespace=${userid}-database
 resource_group=tiu-dgga-rg
 location=koreacentral
-aks_name=ondal-aks
-acr_name=ondalcr
+aks_name=${userid}-aks
+acr_name=${userid}cr
 
-image_reg=ondalcr.azurecr.io
+# Image Settings
+image_reg=${userid}cr.azurecr.io
 image_org=telecom
 image_credential=acr-credentials
 
-event_hub_ns=cqrs-eventhub-ns
+# Event Grid & Storage Settings
+event_hub_ns=${userid}-eventhub-ns
 event_hub_name=phone-plan-events
-storage_account=cqrsstorage
+storage_account=${userid}storage
 blob_container=eventhub-checkpoints
 
+# Database Settings
 postgres_db=telecomdb
 postgres_user=postgres
-postgres_password=Passw0rd
+postgres_password=postgres
 mongodb_db=telecomdb
 mongodb_user=root
 mongodb_password=Passw0rd
-resources_requests_cpu=256m
-resources_requests_memory=256Mi
+
+# Resource Settings
+resources_requests_cpu=250m
+resources_requests_memory=512Mi
 resources_limits_cpu=500m
 resources_limits_memory=1024Mi
