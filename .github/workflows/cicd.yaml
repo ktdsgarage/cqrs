@@ -1,0 +1,267 @@
+# .github/workflows/cicd.yml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      USERID:
+        description: 'User ID for resource naming'
+        required: true
+        default: 'ondal'
+
+env:
+  REGISTRY: ${{ github.event.inputs.USERID }}cr.azurecr.io
+  IMAGE_ORG: telecom
+  DB_NAMESPACE: ${{ github.event.inputs.USERID }}-database
+  APP_NAMESPACE: ${{ github.event.inputs.USERID }}-application
+  LOCATION: koreacentral
+  RESOURCE_GROUP: tiu-dgga-rg
+
+jobs:
+  setup-infrastructure:
+    runs-on: ubuntu-latest
+    outputs:
+      storage_connection: ${{ steps.get-connection-strings.outputs.storage_connection }}
+      plan_connection: ${{ steps.get-connection-strings.outputs.plan_connection }}
+      usage_connection: ${{ steps.get-connection-strings.outputs.usage_connection }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup AKS Context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.RESOURCE_GROUP }}
+          cluster-name: ${{ github.event.inputs.USERID }}-aks
+
+      - name: Create Namespaces
+        run: |
+          kubectl create namespace ${{ env.DB_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace ${{ env.APP_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Setup Azure Resources
+        id: get-connection-strings
+        run: |
+          # Storage Account
+          az storage account create \
+            --name ${{ github.event.inputs.USERID }}storage \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --location ${{ env.LOCATION }} \
+            --sku Standard_LRS \
+            --only-show-errors || true
+          
+          STORAGE_CONNECTION=$(az storage account show-connection-string \
+            --name ${{ github.event.inputs.USERID }}storage \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query connectionString \
+            --output tsv)
+          
+          echo "storage_connection=$STORAGE_CONNECTION" >> $GITHUB_OUTPUT
+          
+          # Create container
+          az storage container create \
+            --name ${{ github.event.inputs.USERID }}-eventhub-checkpoints \
+            --connection-string "$STORAGE_CONNECTION" || true
+          
+          # Event Hubs
+          az eventhubs namespace create \
+            --name ${{ github.event.inputs.USERID }}-eventhub-plan-ns \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --location ${{ env.LOCATION }} \
+            --sku Basic || true
+          
+          az eventhubs namespace create \
+            --name ${{ github.event.inputs.USERID }}-eventhub-usage-ns \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --location ${{ env.LOCATION }} \
+            --sku Basic || true
+          
+          az eventhubs eventhub create \
+            --name phone-plan-events-plan \
+            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-plan-ns \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --partition-count 1 || true
+          
+          az eventhubs eventhub create \
+            --name phone-plan-events-usage \
+            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-usage-ns \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --partition-count 1 || true
+          
+          # Get connection strings
+          PLAN_CONNECTION=$(az eventhubs namespace authorization-rule keys list \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-plan-ns \
+            --name RootManageSharedAccessKey \
+            --query primaryConnectionString -o tsv)
+          
+          USAGE_CONNECTION=$(az eventhubs namespace authorization-rule keys list \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --namespace-name ${{ github.event.inputs.USERID }}-eventhub-usage-ns \
+            --name RootManageSharedAccessKey \
+            --query primaryConnectionString -o tsv)
+          
+          echo "plan_connection=$PLAN_CONNECTION" >> $GITHUB_OUTPUT
+          echo "usage_connection=$USAGE_CONNECTION" >> $GITHUB_OUTPUT
+
+  build:
+    needs: setup-infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Build with Gradle
+        run: |
+          chmod +x gradlew
+          ./gradlew command:clean command:build -x test
+          ./gradlew query:clean query:build -x test
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            command/build/libs/*.jar
+            query/build/libs/*.jar
+
+  docker-build-push:
+    needs: [setup-infrastructure, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Azure Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Build and push Command Service
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: deployment/Dockerfile-command
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ steps.date.outputs.date }}
+
+      - name: Build and push Query Service
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: deployment/Dockerfile-query
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ steps.date.outputs.date }}
+
+  deploy:
+    needs: [setup-infrastructure, docker-build-push]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup AKS Context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.RESOURCE_GROUP }}
+          cluster-name: ${{ github.event.inputs.USERID }}-aks
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Create Kubernetes Secrets
+        run: |
+          kubectl create secret generic eventhub-secret \
+            --namespace ${{ env.APP_NAMESPACE }} \
+            --from-literal=plan-connection-string='${{ needs.setup-infrastructure.outputs.plan_connection }}' \
+            --from-literal=usage-connection-string='${{ needs.setup-infrastructure.outputs.usage_connection }}' \
+            --from-literal=plan-hub-name='phone-plan-events-plan' \
+            --from-literal=usage-hub-name='phone-plan-events-usage' \
+            --from-literal=consumer-group='$Default' \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          kubectl create secret generic storage-secret \
+            --namespace ${{ env.APP_NAMESPACE }} \
+            --from-literal=connection-string='${{ needs.setup-infrastructure.outputs.storage_connection }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Databases
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          MONGODB_PASSWORD: ${{ secrets.MONGODB_PASSWORD }}
+        run: |
+          export userid=${{ github.event.inputs.USERID }}
+          export db_namespace=${{ env.DB_NAMESPACE }}
+          export postgres_password_base64=$(echo -n "$POSTGRES_PASSWORD" | base64)
+          export mongo_password_base64=$(echo -n "$MONGODB_PASSWORD" | base64)
+          export resources_requests_cpu=250m
+          export resources_requests_memory=512Mi
+          export resources_limits_cpu=500m
+          export resources_limits_memory=1024Mi
+          
+          envsubst < deployment/databases.yaml.template > databases.yaml
+          kubectl apply -f databases.yaml
+
+      - name: Deploy Applications
+        run: |
+          export userid=${{ github.event.inputs.USERID }}
+          export app_namespace=${{ env.APP_NAMESPACE }}
+          export image_tag=${{ steps.date.outputs.date }}
+          export command_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ steps.date.outputs.date }}
+          export query_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ steps.date.outputs.date }}
+          export resources_requests_cpu=250m
+          export resources_requests_memory=512Mi
+          export resources_limits_cpu=500m
+          export resources_limits_memory=1024Mi
+          
+          envsubst < deployment/deploy.yaml.template > deploy.yaml
+          kubectl apply -f deploy.yaml
+
+      - name: Verify Deployment
+        run: |
+          echo "Waiting for pods to be ready..."
+          kubectl wait --for=condition=ready pod -l "app=command-service,userid=${{ github.event.inputs.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
+          kubectl wait --for=condition=ready pod -l "app=query-service,userid=${{ github.event.inputs.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
+          
+          echo "Getting service endpoints..."
+          COMMAND_IP=$(kubectl get svc ${{ github.event.inputs.USERID }}-cqrs-command -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          QUERY_IP=$(kubectl get svc ${{ github.event.inputs.USERID }}-cqrs-query -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          echo "Command Service IP: $COMMAND_IP"
+          echo "Query Service IP: $QUERY_IP"
