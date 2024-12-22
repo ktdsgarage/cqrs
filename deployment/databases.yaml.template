@@ -15,7 +15,7 @@ metadata:
   namespace: ${db_namespace}
 data:
   init.sql: |
-    CREATE DATABASE ${postgres_db};
+    CREATE DATABASE telecomdb;  # fixed value
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -44,7 +44,7 @@ spec:
         image: postgres:15
         env:
         - name: POSTGRES_USER
-          value: ${postgres_user}
+          value: postgres  # fixed value
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -116,9 +116,9 @@ spec:
         image: mongo:6
         env:
         - name: MONGO_INITDB_DATABASE
-          value: ${mongodb_db}
+          value: telecomdb  # fixed value
         - name: MONGO_INITDB_ROOT_USERNAME
-          value: ${mongodb_user}
+          value: root  # fixed value
         - name: MONGO_INITDB_ROOT_PASSWORD
           valueFrom:
             secretKeyRef:
