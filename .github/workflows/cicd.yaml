@@ -26,9 +26,9 @@ jobs:
   setup-infrastructure:
     runs-on: ubuntu-latest
     outputs:
-      storage_connection: ${{ steps.get-connection-strings.outputs.storage_connection }}
-      plan_connection: ${{ steps.get-connection-strings.outputs.plan_connection }}
-      usage_connection: ${{ steps.get-connection-strings.outputs.usage_connection }}
+      storage_connection: ${{ steps.set-outputs.outputs.storage_connection }}
+      plan_connection: ${{ steps.set-outputs.outputs.plan_connection }}
+      usage_connection: ${{ steps.set-outputs.outputs.usage_connection }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,12 +45,11 @@ jobs:
 
       - name: Create Namespaces
         run: |
-          # Create namespaces
           kubectl create namespace ${{ env.DB_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace ${{ env.APP_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Setup Azure Resources
-        id: get-connection-strings
+      - name: Setup Azure Resources and Set Outputs
+        id: set-outputs
         run: |
           # Storage Account
           az storage account create \
@@ -60,20 +59,19 @@ jobs:
             --sku Standard_LRS \
             --only-show-errors || true
           
+          # Get Storage connection string
           STORAGE_CONNECTION=$(az storage account show-connection-string \
             --name ${{ env.USERID }}storage \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --query connectionString \
             --output tsv)
           
-          echo "storage_connection=$STORAGE_CONNECTION" >> $GITHUB_OUTPUT
-          
           # Create container
           az storage container create \
             --name ${{ env.USERID }}-eventhub-checkpoints \
             --connection-string "$STORAGE_CONNECTION" || true
           
-          # Event Hubs
+          # Event Hubs setup
           az eventhubs namespace create \
             --name ${{ env.USERID }}-eventhub-plan-ns \
             --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -115,8 +113,29 @@ jobs:
             --name RootManageSharedAccessKey \
             --query primaryConnectionString -o tsv)
           
-          echo "plan_connection=$PLAN_CONNECTION" >> $GITHUB_OUTPUT
-          echo "usage_connection=$USAGE_CONNECTION" >> $GITHUB_OUTPUT
+          # Debug output
+          echo "Storage connection string length: ${#STORAGE_CONNECTION}"
+          echo "Plan connection string length: ${#PLAN_CONNECTION}"
+          echo "Usage connection string length: ${#USAGE_CONNECTION}"
+          
+          # Set outputs using proper delimiter syntax
+          {
+            echo "storage_connection<<EOF"
+            echo "$STORAGE_CONNECTION"
+            echo "EOF"
+            echo "plan_connection<<EOF"
+            echo "$PLAN_CONNECTION"
+            echo "EOF"
+            echo "usage_connection<<EOF"
+            echo "$USAGE_CONNECTION"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          
+          # Verify outputs were set
+          if [ -z "$STORAGE_CONNECTION" ] || [ -z "$PLAN_CONNECTION" ] || [ -z "$USAGE_CONNECTION" ]; then
+            echo "Error: One or more connection strings are empty"
+            exit 1
+          fi
 
   build:
     needs: setup-infrastructure
@@ -213,34 +232,23 @@ jobs:
 
       - name: Create Application Secrets
         run: |
-          # Event Hub connection strings should be available from setup-infrastructure job
-          PLAN_CONNECTION="${{ needs.setup-infrastructure.outputs.plan_connection }}"
-          USAGE_CONNECTION="${{ needs.setup-infrastructure.outputs.usage_connection }}"
+          # Debug output
+          echo "Plan connection string available: ${{ needs.setup-infrastructure.outputs.plan_connection != '' }}"
+          echo "Usage connection string available: ${{ needs.setup-infrastructure.outputs.usage_connection != '' }}"
           
-          if [ -z "$PLAN_CONNECTION" ] || [ -z "$USAGE_CONNECTION" ]; then
-            echo "Error: Event Hub connection strings are empty"
-            exit 1
-          fi
-          
-          echo "Creating Event Hub secret..."
-          echo "Plan connection string length: ${#PLAN_CONNECTION}"
-          echo "Usage connection string length: ${#USAGE_CONNECTION}"
-          
-          # Create Event Hub Secret
+          # Create Event Hub Secret with explicit values
           kubectl create secret generic eventhub-secret \
             --namespace ${{ env.APP_NAMESPACE }} \
-            --from-literal=plan-connection-string="$PLAN_CONNECTION" \
-            --from-literal=usage-connection-string="$USAGE_CONNECTION" \
+            --from-literal=plan-connection-string="${{ needs.setup-infrastructure.outputs.plan_connection }}" \
+            --from-literal=usage-connection-string="${{ needs.setup-infrastructure.outputs.usage_connection }}" \
             --from-literal=plan-hub-name="phone-plan-events-plan" \
             --from-literal=usage-hub-name="phone-plan-events-usage" \
             --from-literal=consumer-group='$Default' \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          # Create Storage Secret
-          kubectl create secret generic storage-secret \
-            --namespace ${{ env.APP_NAMESPACE }} \
-            --from-literal=connection-string='${{ needs.setup-infrastructure.outputs.storage_connection }}' \
-            --dry-run=client -o yaml | kubectl apply -f -
+          # Verify secret creation
+          echo "Verifying Event Hub secret..."
+          kubectl get secret eventhub-secret -n ${{ env.APP_NAMESPACE }} -o yaml
 
       - name: Deploy Databases
         env:
