@@ -89,13 +89,17 @@ jobs:
             --name phone-plan-events-plan \
             --namespace-name ${{ github.event.inputs.USERID }}-eventhub-plan-ns \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --partition-count 1 || true
+            --partition-count 1 \
+            --cleanup-policy Delete \
+            --retention-time 24 || true
           
           az eventhubs eventhub create \
             --name phone-plan-events-usage \
             --namespace-name ${{ github.event.inputs.USERID }}-eventhub-usage-ns \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --partition-count 1 || true
+            --partition-count 1 \
+            --cleanup-policy Delete \
+            --retention-time 24 || true
           
           # Get connection strings
           PLAN_CONNECTION=$(az eventhubs namespace authorization-rule keys list \
