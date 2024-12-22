@@ -33,7 +33,7 @@ podTemplate(
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
         containerTemplate(
             name: 'azure-cli',
-            image: 'mcr.microsoft.com/azure-cli:2.54.0-kubectl-1.28.0',
+            image: 'hiondal/azure-kubectl:latest',
             command: 'cat',
             ttyEnabled: true,
             envVars: [
