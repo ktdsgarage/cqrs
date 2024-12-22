@@ -1,5 +1,6 @@
 def PIPELINE_ID = "cqrs-${env.BUILD_NUMBER}"
 
+
 // Pipeline Parameters
 properties([
     parameters([
