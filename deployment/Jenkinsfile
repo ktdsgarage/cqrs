@@ -9,7 +9,6 @@ def getImageTag() {
 
 podTemplate(
     label: "${PIPELINE_ID}",
-    workspaceVolume: emptyDirVolume(), // workspace 볼륨 명시적 지정
     containers: [
         containerTemplate(name: 'gradle', image: 'gradle:jdk17', ttyEnabled: true, command: 'cat'),
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
@@ -18,8 +17,8 @@ podTemplate(
         containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
     ],
     volumes: [
-        // Gradle 캐시용 emptyDir만 사용
-        emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false)
+        emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
+        emptyDirVolume(mountPath: '/workspace', memory: false)  // workspace volume 추가
     ],
     yaml: """
 apiVersion: v1
