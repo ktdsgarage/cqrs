@@ -9,6 +9,7 @@ def getImageTag() {
 
 podTemplate(
     label: "${PIPELINE_ID}",
+    workspaceVolume: emptyDirVolume(), // workspace 볼륨 명시적 지정
     containers: [
         containerTemplate(name: 'gradle', image: 'gradle:jdk17', ttyEnabled: true, command: 'cat'),
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
@@ -17,14 +18,17 @@ podTemplate(
         containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
     ],
     volumes: [
-        // Jenkins 워크스페이스를 공유
-        emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
-        persistentVolumeClaim(
-            mountPath: '/home/jenkins/agent',
-            claimName: 'jenkins',  // Jenkins PVC 이름
-            readOnly: false
-        )
-    ]
+        // Gradle 캐시용 emptyDir만 사용
+        emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false)
+    ],
+    yaml: """
+apiVersion: v1
+kind: Pod
+spec:
+  securityContext:
+    runAsUser: 1000
+    fsGroup: 1000
+"""
 ) {
     node(PIPELINE_ID) {
         def props
