@@ -18,7 +18,7 @@ podTemplate(
             command: 'cat',
             ttyEnabled: true,
             envVars: [
-                envVar(key: 'HOME', value: '/home/jenkins')  // HOME 디렉토리 설정
+                envVar(key: 'HOME', value: '/home/jenkins')
             ]
         ),
         containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl', command: 'cat', ttyEnabled: true),
@@ -26,7 +26,7 @@ podTemplate(
     ],
     volumes: [
         emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
-        emptyDirVolume(mountPath: '/home/jenkins', memory: false)  // azure cli용 홈 디렉토리
+        emptyDirVolume(mountPath: '/home/jenkins', memory: false)
     ],
     yaml: """
 apiVersion: v1
@@ -60,13 +60,30 @@ spec:
         try {
             stage("Setup AKS & ACR") {
                 container('azure-cli') {
-                    // Azure CLI를 사용한 AKS 및 ACR 설정
                     withCredentials([azureServicePrincipal('azure-credentials')]) {
                         sh """
-                            mkdir -p ~/.azure  # .azure 디렉토리 생성
+                            mkdir -p ~/.azure
                             az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID
                             az aks get-credentials --resource-group ${props.resource_group} --name ${props.aks_name}
-                            az acr login --name ${props.acr_name}
+                        """
+                    }
+                }
+
+                container('podman') {
+                    withCredentials([azureServicePrincipal('azure-credentials')]) {
+                        // Get ACR access token using azure-cli
+                        def acrToken = sh(
+                            script: """
+                                az acr login --name ${props.acr_name} --expose-token --output tsv --query accessToken
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        // Login to ACR using podman
+                        sh """
+                            podman login ${imageReg} \
+                                --username 00000000-0000-0000-0000-000000000000 \
+                                --password ${acrToken}
                         """
                     }
                 }
@@ -74,21 +91,20 @@ spec:
 
             stage("Setup Event Hub & Storage") {
                 container('azure-cli') {
-                    // Event Hub 및 Storage Account 설정
                     sh """
-                        az eventhubs namespace create --name ${props.event_hub_ns} \\
-                            --resource-group ${props.resource_group} \\
-                            --location ${props.location} \\
+                        az eventhubs namespace create --name ${props.event_hub_ns} \
+                            --resource-group ${props.resource_group} \
+                            --location ${props.location} \
                             --sku Basic || true
 
-                        az eventhubs eventhub create --name ${props.event_hub_name} \\
-                            --namespace-name ${props.event_hub_ns} \\
-                            --resource-group ${props.resource_group} \\
+                        az eventhubs eventhub create --name ${props.event_hub_name} \
+                            --namespace-name ${props.event_hub_ns} \
+                            --resource-group ${props.resource_group} \
                             --partition-count 1 || true
 
-                        az storage account create --name ${props.storage_account} \\
-                            --resource-group ${props.resource_group} \\
-                            --location ${props.location} \\
+                        az storage account create --name ${props.storage_account} \
+                            --resource-group ${props.resource_group} \
+                            --location ${props.location} \
                             --sku Standard_LRS || true
                     """
                 }
@@ -110,12 +126,12 @@ spec:
                     def queryImagePath = "${imageReg}/${imageOrg}/cqrs-query"
 
                     sh """
-                        podman build -f deployment/Dockerfile-command \\
-                            -t ${commandImagePath}:${imageTag} \\
+                        podman build -f deployment/Dockerfile-command \
+                            -t ${commandImagePath}:${imageTag} \
                             -t ${commandImagePath}:latest .
 
-                        podman build -f deployment/Dockerfile-query \\
-                            -t ${queryImagePath}:${imageTag} \\
+                        podman build -f deployment/Dockerfile-query \
+                            -t ${queryImagePath}:${imageTag} \
                             -t ${queryImagePath}:latest .
                     """
                 }
@@ -123,21 +139,16 @@ spec:
 
             stage('Push Container Images') {
                 container('podman') {
-                    withCredentials([usernamePassword(
-                        credentialsId: "${imageCredential}",
-                        usernameVariable: 'USERNAME',
-                        passwordVariable: 'PASSWORD'
-                    )]) {
-                        sh """
-                            podman login ${imageReg} --username ${USERNAME} --password ${PASSWORD}
+                    def commandImagePath = "${imageReg}/${imageOrg}/cqrs-command"
+                    def queryImagePath = "${imageReg}/${imageOrg}/cqrs-query"
 
-                            podman push ${imageReg}/${imageOrg}/cqrs-command:${imageTag}
-                            podman push ${imageReg}/${imageOrg}/cqrs-command:latest
+                    sh """
+                        podman push ${commandImagePath}:${imageTag}
+                        podman push ${commandImagePath}:latest
 
-                            podman push ${imageReg}/${imageOrg}/cqrs-query:${imageTag}
-                            podman push ${imageReg}/${imageOrg}/cqrs-query:latest
-                        """
-                    }
+                        podman push ${queryImagePath}:${imageTag}
+                        podman push ${queryImagePath}:latest
+                    """
                 }
             }
 
