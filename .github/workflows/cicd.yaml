@@ -282,3 +282,4 @@ jobs:
           
           echo "Command Service IP: $COMMAND_IP"
           echo "Query Service IP: $QUERY_IP"
+
