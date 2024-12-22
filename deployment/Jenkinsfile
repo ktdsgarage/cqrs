@@ -239,10 +239,8 @@ podTemplate(
                         set -e
                         chmod +x gradlew
                         ./gradlew command:clean command:build -x test
-                        check_result "Command service build"
 
                         ./gradlew query:clean query:build -x test
-                        check_result "Query service build"
                     """
                 }
                 checkError("Application Build Failed")
@@ -259,13 +257,11 @@ podTemplate(
                         podman build -f deployment/Dockerfile-command \
                             -t ${commandImagePath}:${imageTag} \
                             -t ${commandImagePath}:latest .
-                        check_result "Command service image build"
 
                         # Query Service Image
                         podman build -f deployment/Dockerfile-query \
                             -t ${queryImagePath}:${imageTag} \
                             -t ${queryImagePath}:latest .
-                        check_result "Query service image build"
                     """
                 }
                 checkError("Container Image Build Failed")
@@ -284,21 +280,16 @@ podTemplate(
                         sh """
                             set -e
                             podman login ${imageReg} --username \$USERNAME --password \$PASSWORD
-                            check_result "ACR login"
 
                             # Push Command Service Images
                             podman push ${commandImagePath}:${imageTag}
-                            check_result "Command service image push (tagged)"
 
                             podman push ${commandImagePath}:latest
-                            check_result "Command service image push (latest)"
 
                             # Push Query Service Images
                             podman push ${queryImagePath}:${imageTag}
-                            check_result "Query service image push (tagged)"
 
                             podman push ${queryImagePath}:latest
-                            check_result "Query service image push (latest)"
                         """
                     }
                 }
@@ -324,17 +315,13 @@ podTemplate(
 
                         # Convert passwords to base64
                         export postgres_password_base64=\$(echo -n "${props.postgres_password}" | base64)
-                        check_result "Postgres password conversion"
 
                         export mongo_password_base64=\$(echo -n "${props.mongodb_password}" | base64)
-                        check_result "MongoDB password conversion"
 
                         # Generate deployment files
                         envsubst < deployment/${manifest}.template > deployment/${manifest}
-                        check_result "Main manifest generation"
 
                         envsubst < deployment/databases.yaml.template > deployment/databases.yaml
-                        check_result "Database manifest generation"
 
                         # Verify generated files
                         if [ ! -s deployment/${manifest} ] || [ ! -s deployment/databases.yaml ]; then
@@ -352,32 +339,25 @@ podTemplate(
                         set -e
                         # Deploy databases
                         kubectl apply -f deployment/databases.yaml
-                        check_result "Database deployment"
 
                         echo "Waiting for database pods to be ready..."
                         kubectl wait --for=condition=ready pod -l "app=postgres,userid=${userid}" -n ${db_namespace} --timeout=300s
-                        check_result "Postgres pod readiness"
 
                         kubectl wait --for=condition=ready pod -l "app=mongodb,userid=${userid}" -n ${db_namespace} --timeout=300s
-                        check_result "MongoDB pod readiness"
 
                         # Copy DB credentials to application namespace
                         kubectl get secret ${userid}-db-credentials -n ${db_namespace} -o yaml | \
                             sed 's/namespace: .*/namespace: ${app_namespace}/' | \
                             kubectl apply -f -
-                        check_result "Database credentials copy"
 
                         # Deploy application
                         kubectl apply -f deployment/${manifest}
-                        check_result "Application deployment"
 
                         # Wait for application pods
                         echo "Waiting for application pods to be ready..."
                         kubectl wait --for=condition=ready pod -l "app=command-service,userid=${userid}" -n ${app_namespace} --timeout=300s
-                        check_result "Command service pod readiness"
 
                         kubectl wait --for=condition=ready pod -l "app=query-service,userid=${userid}" -n ${app_namespace} --timeout=300s
-                        check_result "Query service pod readiness"
                     """
                 }
                 checkError("Deployment to AKS Failed")
