@@ -21,7 +21,7 @@ podTemplate(
         emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
         persistentVolumeClaim(
             mountPath: '/home/jenkins/agent',
-            claimName: 'pvc-98cebec9-cd57-40b2-848e-e3b28efa030f',  // Jenkins PVC 이름
+            claimName: 'jenkins',  // Jenkins PVC 이름
             readOnly: false
         )
     ]
