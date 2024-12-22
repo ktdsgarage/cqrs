@@ -10,18 +10,24 @@ data:
   # PostgreSQL 설정
   POSTGRES_HOST: "${userid}-postgres.${db_namespace}.svc.cluster.local"
   POSTGRES_PORT: "5432"
-  POSTGRES_DB: "${postgres_db}"
-  POSTGRES_USER: "${postgres_user}"
+  POSTGRES_DB: "telecomdb"
+  POSTGRES_USER: "postgres"
 
   # MongoDB 설정
   MONGODB_HOST: "${userid}-mongodb.${db_namespace}.svc.cluster.local"
   MONGODB_PORT: "27017"
-  MONGODB_DB: "${mongodb_db}"
-  MONGODB_USER: "${mongodb_user}"
+  MONGODB_DB: "telecomdb"
+  MONGODB_USER: "root"
+
+  # JPA 설정
+  JPA_DDL_AUTO: "update"
+  JPA_SHOW_SQL: "false"
 
   # Event Hub 설정
-  EVENT_HUB_NS: "${event_hub_ns}"
-  EVENT_HUB_NAME: "${event_hub_name}"
+  EVENT_HUB_PLAN_NS: "${event_hub_ns}"
+  EVENT_HUB_USAGE_NS: "${event_hub_ns}"
+  EVENT_HUB_PLAN_NAME: "phone-plan-events-plan"
+  EVENT_HUB_USAGE_NAME: "phone-plan-events-usage"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,6 +61,11 @@ spec:
             secretKeyRef:
               name: ${userid}-db-credentials
               key: postgres-password
+        - name: STORAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: storage-secret
+              key: connection-string
         - name: EVENT_HUB_PLAN_CONNECTION_STRING
           valueFrom:
             secretKeyRef:
@@ -65,26 +76,10 @@ spec:
             secretKeyRef:
               name: eventhub-secret
               key: usage-connection-string
-        - name: EVENT_HUB_PLAN_NAME
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: plan-hub-name
-        - name: EVENT_HUB_USAGE_NAME
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: usage-hub-name
-        - name: EVENT_HUB_CONSUMER_GROUP
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: consumer-group
-        - name: STORAGE_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: storage-secret
-              key: connection-string
+        - name: EVENT_HUB_NAMESPACE_PLAN
+          value: "${event_hub_ns}"
+        - name: EVENT_HUB_NAMESPACE_USAGE
+          value: "${event_hub_ns}"
         resources:
           requests:
             cpu: ${resources_requests_cpu}
@@ -92,6 +87,20 @@ spec:
           limits:
             cpu: ${resources_limits_cpu}
             memory: ${resources_limits_memory}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${userid}-cqrs-command
+  namespace: ${app_namespace}
+spec:
+  selector:
+    app: command-service
+    userid: ${userid}
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: LoadBalancer
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -125,6 +134,11 @@ spec:
             secretKeyRef:
               name: ${userid}-db-credentials
               key: mongo-password
+        - name: STORAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: storage-secret
+              key: connection-string
         - name: EVENT_HUB_PLAN_CONNECTION_STRING
           valueFrom:
             secretKeyRef:
@@ -135,27 +149,11 @@ spec:
             secretKeyRef:
               name: eventhub-secret
               key: usage-connection-string
-        - name: EVENT_HUB_PLAN_NAME
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: plan-hub-name
-        - name: EVENT_HUB_USAGE_NAME
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: usage-hub-name
-        - name: EVENT_HUB_CONSUMER_GROUP
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: consumer-group
-        - name: STORAGE_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: storage-secret
-              key: connection-string
-        - name: BLOB_CONTAINER_NAME
+        - name: EVENT_HUB_NAMESPACE_PLAN
+          value: "${event_hub_ns}"
+        - name: EVENT_HUB_NAMESPACE_USAGE
+          value: "${event_hub_ns}"
+        - name: BLOB_CONTAINER
           value: "${userid}-eventhub-checkpoints"
         resources:
           requests:
@@ -164,20 +162,6 @@ spec:
           limits:
             cpu: ${resources_limits_cpu}
             memory: ${resources_limits_memory}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${userid}-cqrs-command
-  namespace: ${app_namespace}
-spec:
-  selector:
-    app: command-service
-    userid: ${userid}
-  ports:
-  - port: 8080
-    targetPort: 8080
-  type: LoadBalancer
 ---
 apiVersion: v1
 kind: Service
