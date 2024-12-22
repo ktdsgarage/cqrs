@@ -21,6 +21,7 @@ env:
   APP_NAMESPACE: ondal-application
   LOCATION: koreacentral
   RESOURCE_GROUP: tiu-dgga-rg
+  IMAGE_TAG: v${{ github.run_number }}
 
 jobs:
   setup-infrastructure:
@@ -187,8 +188,8 @@ jobs:
           file: deployment/Dockerfile-command
           push: true
           tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ steps.date.outputs.date }}
 
       - name: Build and push Query Service
         uses: docker/build-push-action@v4
@@ -197,8 +198,8 @@ jobs:
           file: deployment/Dockerfile-query
           push: true
           tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ steps.date.outputs.date }}
 
   deploy:
     needs: [setup-infrastructure, docker-build-push]
@@ -259,9 +260,8 @@ jobs:
         run: |
           export userid=${{ env.USERID }}
           export app_namespace=${{ env.APP_NAMESPACE }}
-          export image_tag=${{ steps.date.outputs.date }}
-          export command_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ steps.date.outputs.date }}
-          export query_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ steps.date.outputs.date }}
+          export command_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ env.IMAGE_TAG }}
+          export query_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ env.IMAGE_TAG }}
           export resources_requests_cpu=250m
           export resources_requests_memory=512Mi
           export resources_limits_cpu=500m
