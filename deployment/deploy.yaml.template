@@ -55,6 +55,36 @@ spec:
             secretKeyRef:
               name: ${userid}-db-credentials
               key: postgres-password
+        - name: EVENT_HUB_PLAN_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: plan-connection-string
+        - name: EVENT_HUB_USAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: usage-connection-string
+        - name: EVENT_HUB_PLAN_NAME
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: plan-hub-name
+        - name: EVENT_HUB_USAGE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: usage-hub-name
+        - name: EVENT_HUB_CONSUMER_GROUP
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: consumer-group
+        - name: STORAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: storage-secret
+              key: connection-string
         resources:
           requests:
             cpu: ${resources_requests_cpu}
@@ -95,6 +125,40 @@ spec:
             secretKeyRef:
               name: ${userid}-db-credentials
               key: mongo-password
+        - name: EVENT_HUB_PLAN_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: plan-connection-string
+        - name: EVENT_HUB_USAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: usage-connection-string
+        - name: EVENT_HUB_PLAN_NAME
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: plan-hub-name
+        - name: EVENT_HUB_USAGE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: usage-hub-name
+        - name: EVENT_HUB_CONSUMER_GROUP
+          valueFrom:
+            secretKeyRef:
+              name: eventhub-secret
+              key: consumer-group
+        - name: STORAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: storage-secret
+              key: connection-string
+        - name: STORAGE_CONTAINER_NAME
+          value: "${userid}-eventhub-checkpoints"
+        - name: BLOB_CONTAINER_NAME
+          value: "${userid}-eventhub-checkpoints"
         resources:
           requests:
             cpu: ${resources_requests_cpu}
