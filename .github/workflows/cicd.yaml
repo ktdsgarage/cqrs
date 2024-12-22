@@ -14,6 +14,7 @@ on:
         default: 'ondal'
 
 env:
+  USERID: ondal
   REGISTRY: ${{ github.event.inputs.USERID }}cr.azurecr.io
   IMAGE_ORG: telecom
   DB_NAMESPACE: ${{ github.event.inputs.USERID }}-database
