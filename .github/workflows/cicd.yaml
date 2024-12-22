@@ -191,6 +191,7 @@ jobs:
   deploy:
     needs: [setup-infrastructure, docker-build-push]
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -212,13 +213,26 @@ jobs:
 
       - name: Create Application Secrets
         run: |
+          # Event Hub connection strings should be available from setup-infrastructure job
+          PLAN_CONNECTION="${{ needs.setup-infrastructure.outputs.plan_connection }}"
+          USAGE_CONNECTION="${{ needs.setup-infrastructure.outputs.usage_connection }}"
+          
+          if [ -z "$PLAN_CONNECTION" ] || [ -z "$USAGE_CONNECTION" ]; then
+            echo "Error: Event Hub connection strings are empty"
+            exit 1
+          fi
+          
+          echo "Creating Event Hub secret..."
+          echo "Plan connection string length: ${#PLAN_CONNECTION}"
+          echo "Usage connection string length: ${#USAGE_CONNECTION}"
+          
           # Create Event Hub Secret
           kubectl create secret generic eventhub-secret \
             --namespace ${{ env.APP_NAMESPACE }} \
-            --from-literal=plan-connection-string='${{ needs.setup-infrastructure.outputs.plan_connection }}' \
-            --from-literal=usage-connection-string='${{ needs.setup-infrastructure.outputs.usage_connection }}' \
-            --from-literal=plan-hub-name='phone-plan-events-plan' \
-            --from-literal=usage-hub-name='phone-plan-events-usage' \
+            --from-literal=plan-connection-string="$PLAN_CONNECTION" \
+            --from-literal=usage-connection-string="$USAGE_CONNECTION" \
+            --from-literal=plan-hub-name="phone-plan-events-plan" \
+            --from-literal=usage-hub-name="phone-plan-events-usage" \
             --from-literal=consumer-group='$Default' \
             --dry-run=client -o yaml | kubectl apply -f -
           
@@ -262,6 +276,19 @@ jobs:
 
       - name: Deploy Applications
         run: |
+          # Verify Event Hub secrets
+          SECRET_DATA=$(kubectl get secret eventhub-secret -n ${{ env.APP_NAMESPACE }} -o json)
+          PLAN_LENGTH=$(echo $SECRET_DATA | jq -r '.data["plan-connection-string"]' | base64 -d | wc -c)
+          USAGE_LENGTH=$(echo $SECRET_DATA | jq -r '.data["usage-connection-string"]' | base64 -d | wc -c)
+          
+          echo "Plan connection string length in secret: $PLAN_LENGTH"
+          echo "Usage connection string length in secret: $USAGE_LENGTH"
+          
+          if [ "$PLAN_LENGTH" -lt 10 ] || [ "$USAGE_LENGTH" -lt 10 ]; then
+            echo "Error: Event Hub connection strings in secret are too short or empty"
+            exit 1
+          fi
+          
           # Set environment variables for template
           export userid=${{ env.USERID }}
           export db_namespace=${{ env.DB_NAMESPACE }}
@@ -276,7 +303,7 @@ jobs:
           # Generate and apply application manifest
           envsubst < deployment/deploy.yaml.template > deploy.yaml
           kubectl apply -f deploy.yaml
-
+          
           echo "Waiting for application pods to start..."
           sleep 30  # Give some time for pods to be created
           
@@ -284,7 +311,7 @@ jobs:
           kubectl wait --for=condition=ready pod -l "app=command-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s || true
           kubectl wait --for=condition=ready pod -l "app=query-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s || true
 
-      - name: Verify Deployment
+      - name: Verify Deployment and Show Logs
         run: |
           echo "Getting service endpoints..."
           COMMAND_IP=$(kubectl get svc ${{ env.USERID }}-cqrs-command -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
@@ -292,6 +319,12 @@ jobs:
           
           echo "Command Service IP: $COMMAND_IP"
           echo "Query Service IP: $QUERY_IP"
+          
+          echo "Showing recent logs from command service..."
+          kubectl logs -l "app=command-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --tail=100 || true
+          
+          echo "Showing recent logs from query service..."
+          kubectl logs -l "app=query-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --tail=100 || true
           
           # Basic health check
           if [ -n "$COMMAND_IP" ] && [ -n "$QUERY_IP" ]; then
