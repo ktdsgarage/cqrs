@@ -43,15 +43,6 @@ jobs:
           resource-group: ${{ env.RESOURCE_GROUP }}
           cluster-name: ${{ env.USERID }}-aks
 
-      - name: Create Image Pull Secret
-        run: |
-          kubectl create secret docker-registry acr-secret \
-            --docker-server=${{ env.REGISTRY }} \
-            --docker-username=${{ secrets.ACR_USERNAME }} \
-            --docker-password=${{ secrets.ACR_PASSWORD }} \
-            --namespace=${{ env.APP_NAMESPACE }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
       - name: Create Namespaces
         run: |
           kubectl create namespace ${{ env.DB_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
