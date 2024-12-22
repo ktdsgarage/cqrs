@@ -27,6 +27,7 @@ def checkError(message) {
 
 podTemplate(
     label: "${PIPELINE_ID}",
+    serviceAccount: 'jenkins',  // serviceAccount 지정
     containers: [
         containerTemplate(name: 'gradle', image: 'gradle:jdk17', ttyEnabled: true, command: 'cat'),
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
