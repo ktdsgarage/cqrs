@@ -174,39 +174,45 @@ podTemplate(
                             check_result "Usage Event Hub Namespace creation"
                         fi
 
-                        # Plan Event Hub 생성
-                        echo "Creating Plan Event Hub..."
-                        az eventhubs eventhub create \
-                            --name phone-plan-events-plan \
-                            --namespace-name ${userid}-eventhub-plan-ns \
-                            --resource-group ${props.resource_group} \
-                            --partition-count 1
-                        check_result "Plan Event Hub creation"
+                       # Plan Event Hub 생성
+                       EXISTING_PLAN_HUB=$(az eventhubs eventhub show \
+                           --name phone-plan-events-plan \
+                           --namespace-name ${userid}-eventhub-plan-ns \
+                           --resource-group ${props.resource_group} \
+                           --query name \
+                           --output tsv 2>/dev/null)
 
-                        # Plan Event Hub 생성 확인
-                        echo "Verifying Plan Event Hub..."
-                        az eventhubs eventhub show \
-                            --name phone-plan-events-plan \
-                            --namespace-name ${userid}-eventhub-plan-ns \
-                            --resource-group ${props.resource_group}
-                        check_result "Plan Event Hub verification"
+                       if [ -z "$EXISTING_PLAN_HUB" ]; then
+                           log "Plan Event Hub 생성 중..."
+                           az eventhubs eventhub create \
+                               --name phone-plan-events-plan \
+                               --namespace-name ${userid}-eventhub-plan-ns \
+                               --resource-group ${props.resource_group} \
+                               --partition-count 1 \
+                               --cleanup-policy Delete \
+                               --retention-time 24
+                           check_result "Plan Event Hub 생성 실패"
+                       fi
 
-                        # Usage Event Hub 생성
-                        echo "Creating Usage Event Hub..."
-                        az eventhubs eventhub create \
-                            --name phone-plan-events-usage \
-                            --namespace-name ${userid}-eventhub-usage-ns \
-                            --resource-group ${props.resource_group} \
-                            --partition-count 1
-                        check_result "Usage Event Hub creation"
+                       # Usage Event Hub 생성
+                       EXISTING_USAGE_HUB=$(az eventhubs eventhub show \
+                           --name phone-plan-events-usage \
+                           --namespace-name ${userid}-eventhub-usage-ns \
+                           --resource-group ${props.resource_group} \
+                           --query name \
+                           --output tsv 2>/dev/null)
 
-                        # Usage Event Hub 생성 확인
-                        echo "Verifying Usage Event Hub..."
-                        az eventhubs eventhub show \
-                            --name phone-plan-events-usage \
-                            --namespace-name ${userid}-eventhub-usage-ns \
-                            --resource-group ${props.resource_group}
-                        check_result "Usage Event Hub verification"
+                       if [ -z "$EXISTING_USAGE_HUB" ]; then
+                           log "Usage Event Hub 생성 중..."
+                           az eventhubs eventhub create \
+                               --name phone-plan-events-usage \
+                               --namespace-name ${userid}-eventhub-usage-ns \
+                               --resource-group ${props.resource_group} \
+                               --partition-count 1 \
+                               --cleanup-policy Delete \
+                               --retention-time 24
+                           check_result "Usage Event Hub 생성 실패"
+                       fi
 
                         # Get connection strings
                         PLAN_CONNECTION_STRING=\$(az eventhubs namespace authorization-rule keys list \
