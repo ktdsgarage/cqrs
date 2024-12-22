@@ -98,8 +98,25 @@ spec:
                         sh """
                             set -e
                             mkdir -p ~/.azure
+
+                            # Clean up any existing kubeconfig
+                            rm -f ~/.kube/config
+
+                            # Setup kubectl config directory
+                            mkdir -p ~/.kube
+
+                            # Login to Azure
                             az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID
-                            az aks get-credentials --resource-group ${props.resource_group} --name ${userid}-aks --overwrite-existing
+
+                            # Get AKS credentials with explicit kubeconfig path
+                            az aks get-credentials \
+                                --resource-group ${props.resource_group} \
+                                --name ${userid}-aks \
+                                --file ~/.kube/config \
+                                --overwrite-existing
+
+                            # Set KUBECONFIG environment variable
+                            export KUBECONFIG=~/.kube/config
                         """
                     }
                 }
