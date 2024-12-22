@@ -1,0 +1,173 @@
+def PIPELINE_ID = "cqrs-${env.BUILD_NUMBER}"
+def NFS_HOST = "10.17.0.133"
+def NFS_DIR = "data/nfs"
+
+// Image 태그 생성 함수
+def getImageTag() {
+    def dateFormat = new java.text.SimpleDateFormat('yyyyMMddHHmmss')
+    def currentDate = new Date()
+    return dateFormat.format(currentDate)
+}
+
+podTemplate(
+    label: "${PIPELINE_ID}",
+    containers: [
+        containerTemplate(name: 'gradle', image: 'gradle:jdk17', ttyEnabled: true, command: 'cat'),
+        containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
+        containerTemplate(name: 'azure-cli', image: 'mcr.microsoft.com/azure-cli', command: 'cat', ttyEnabled: true),
+        containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl', command: 'cat', ttyEnabled: true),
+        containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
+    ],
+    volumes: [
+        nfsVolume(mountPath: "/home/gradle/.gradle", serverAddress: "${NFS_HOST}", serverPath: "/${NFS_DIR}/gradle/cqrs", readOnly: false)
+    ]
+) {
+    node(PIPELINE_ID) {
+        def props
+        def applicationName
+        def namespace
+        def imageReg
+        def imageOrg
+        def imageTag = getImageTag()
+        def imageCredential
+        def manifest = "deploy.yaml"
+
+        stage("Get Source") {
+            checkout scm
+            props = readProperties file: "deployment/deploy_env_vars"
+            applicationName = props["application_name"]
+            namespace = props["namespace"]
+            imageReg = props["image_reg"]
+            imageOrg = props["image_org"]
+            imageCredential = props["image_credential"]
+        }
+
+        try {
+            stage("Setup AKS & ACR") {
+                container('azure-cli') {
+                    // Azure CLI를 사용한 AKS 및 ACR 설정
+                    withCredentials([azureServicePrincipal('azure-credentials')]) {
+                        sh """
+                            az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID
+                            az aks get-credentials --resource-group ${props.resource_group} --name ${props.aks_name}
+                            az acr login --name ${props.acr_name}
+                        """
+                    }
+                }
+            }
+
+            stage("Setup Event Hub & Storage") {
+                container('azure-cli') {
+                    // Event Hub 및 Storage Account 설정
+                    sh """
+                        az eventhubs namespace create --name ${props.event_hub_ns} \\
+                            --resource-group ${props.resource_group} \\
+                            --location ${props.location} \\
+                            --sku Basic || true
+
+                        az eventhubs eventhub create --name ${props.event_hub_name} \\
+                            --namespace-name ${props.event_hub_ns} \\
+                            --resource-group ${props.resource_group} \\
+                            --partition-count 1 || true
+
+                        az storage account create --name ${props.storage_account} \\
+                            --resource-group ${props.resource_group} \\
+                            --location ${props.location} \\
+                            --sku Standard_LRS || true
+                    """
+                }
+            }
+
+            stage('Build Applications') {
+                container('gradle') {
+                    sh """
+                        chmod +x gradlew
+                        ./gradlew command:clean command:build -x test
+                        ./gradlew query:clean query:build -x test
+                    """
+                }
+            }
+
+            stage('Build Container Images') {
+                container('podman') {
+                    def commandImagePath = "${imageReg}/${imageOrg}/cqrs-command"
+                    def queryImagePath = "${imageReg}/${imageOrg}/cqrs-query"
+
+                    sh """
+                        podman build -f deployment/Dockerfile-command \\
+                            -t ${commandImagePath}:${imageTag} \\
+                            -t ${commandImagePath}:latest .
+
+                        podman build -f deployment/Dockerfile-query \\
+                            -t ${queryImagePath}:${imageTag} \\
+                            -t ${queryImagePath}:latest .
+                    """
+                }
+            }
+
+            stage('Push Container Images') {
+                container('podman') {
+                    withCredentials([usernamePassword(
+                        credentialsId: "${imageCredential}",
+                        usernameVariable: 'USERNAME',
+                        passwordVariable: 'PASSWORD'
+                    )]) {
+                        sh """
+                            podman login ${imageReg} --username ${USERNAME} --password ${PASSWORD}
+
+                            podman push ${imageReg}/${imageOrg}/cqrs-command:${imageTag}
+                            podman push ${imageReg}/${imageOrg}/cqrs-command:latest
+
+                            podman push ${imageReg}/${imageOrg}/cqrs-query:${imageTag}
+                            podman push ${imageReg}/${imageOrg}/cqrs-query:latest
+                        """
+                    }
+                }
+            }
+
+            stage('Generate Deployment YAML') {
+                container('envsubst') {
+                    sh """
+                        set -a
+                        source deployment/deploy_env_vars
+                        set +a
+
+                        export image_tag=${imageTag}
+                        export command_image_path=${imageReg}/${imageOrg}/cqrs-command:${imageTag}
+                        export query_image_path=${imageReg}/${imageOrg}/cqrs-query:${imageTag}
+
+                        # Convert passwords to base64
+                        export postgres_password_base64=\$(echo -n "${props.postgres_password}" | base64)
+                        export mongo_password_base64=\$(echo -n "${props.mongodb_password}" | base64)
+
+                        # Generate both yaml files
+                        envsubst < deployment/${manifest}.template > deployment/${manifest}
+                        envsubst < deployment/databases.yaml.template > deployment/databases.yaml
+
+                        cat deployment/${manifest}
+                        cat deployment/databases.yaml
+                    """
+                }
+            }
+
+            stage('Deploy to AKS') {
+                container('kubectl') {
+                    sh """
+                        kubectl apply -f deployment/databases.yaml -n ${namespace}
+                        kubectl wait --for=condition=ready pod -l app=postgres -n ${namespace} --timeout=300s
+                        kubectl wait --for=condition=ready pod -l app=mongodb -n ${namespace} --timeout=300s
+
+                        kubectl apply -f deployment/${manifest} -n ${namespace}
+                    """
+                }
+            }
+
+            currentBuild.result = 'SUCCESS'
+            echo "**** FINISH ALL STAGES : SUCCESS"
+
+        } catch(e) {
+            currentBuild.result = "FAILED"
+            throw e
+        }
+    }
+}
