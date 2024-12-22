@@ -175,12 +175,12 @@ podTemplate(
                         fi
 
                         # Plan Event Hub 생성
-                        EXISTING_PLAN_HUB="\$(az eventhubs eventhub show \
+                        EXISTING_PLAN_HUB=\$(az eventhubs eventhub show \
                             --name phone-plan-events-plan \
                             --namespace-name ${userid}-eventhub-plan-ns \
                             --resource-group ${props.resource_group} \
                             --query name \
-                            --output tsv 2>/dev/null || echo '')"
+                            --output tsv 2>/dev/null || echo "")
 
                         if [ -z "\${EXISTING_PLAN_HUB}" ]; then
                             echo "Plan Event Hub 생성 중..."
@@ -195,12 +195,12 @@ podTemplate(
                         fi
 
                         # Usage Event Hub 생성
-                        EXISTING_USAGE_HUB="\$(az eventhubs eventhub show \
+                        EXISTING_USAGE_HUB=\$(az eventhubs eventhub show \
                             --name phone-plan-events-usage \
                             --namespace-name ${userid}-eventhub-usage-ns \
                             --resource-group ${props.resource_group} \
                             --query name \
-                            --output tsv 2>/dev/null || echo '')"
+                            --output tsv 2>/dev/null || echo "")
 
                         if [ -z "\${EXISTING_USAGE_HUB}" ]; then
                             echo "Usage Event Hub 생성 중..."
