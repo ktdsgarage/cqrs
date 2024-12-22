@@ -29,14 +29,8 @@ podTemplate(
     label: "${PIPELINE_ID}",
     serviceAccount: 'jenkins',
     containers: [
-        containerTemplate(name: 'gradle',
-            image: 'gradle:jdk17',
-            ttyEnabled: true,
-            command: 'cat',
-            envVars: [
-                envVar(key: 'GRADLE_USER_HOME', value: '/var/jenkins_home/.gradle')
-            ]
-        ),
+        containerTemplate(name: 'gradle', image: 'gradle:jdk17', ttyEnabled: true, command: 'cat'),
+
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
         containerTemplate(
             name: 'azure-cli',
@@ -50,13 +44,7 @@ podTemplate(
         containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
     ],
     volumes: [
-        //emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
-        // Jenkins Pod의 /var/jenkins_home을 공유
-        persistentVolumeClaim(
-            mountPath: '/var/jenkins_home',
-            claimName: 'jenkins',
-            readOnly: false
-        ),
+        emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
         emptyDirVolume(mountPath: '/home/jenkins', memory: false)
     ]
 ) {
