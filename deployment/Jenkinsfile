@@ -182,7 +182,7 @@ podTemplate(
                            --query name \
                            --output tsv 2>/dev/null)
 
-                       if [ -z "$EXISTING_PLAN_HUB" ]; then
+                       if [ -z "\$EXISTING_PLAN_HUB" ]; then
                            log "Plan Event Hub 생성 중..."
                            az eventhubs eventhub create \
                                --name phone-plan-events-plan \
@@ -202,7 +202,7 @@ podTemplate(
                            --query name \
                            --output tsv 2>/dev/null)
 
-                       if [ -z "$EXISTING_USAGE_HUB" ]; then
+                       if [ -z "\$EXISTING_USAGE_HUB" ]; then
                            log "Usage Event Hub 생성 중..."
                            az eventhubs eventhub create \
                                --name phone-plan-events-usage \
