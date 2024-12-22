@@ -15,10 +15,10 @@ on:
 
 env:
   USERID: ondal
-  REGISTRY: ${{ env.USERID }}cr.azurecr.io
+  REGISTRY: ondalcr.azurecr.io
   IMAGE_ORG: telecom
-  DB_NAMESPACE: ${{ env.USERID }}-database
-  APP_NAMESPACE: ${{ env.USERID }}-application
+  DB_NAMESPACE: ondal-database
+  APP_NAMESPACE: ondal-application
   LOCATION: koreacentral
   RESOURCE_GROUP: tiu-dgga-rg
 
