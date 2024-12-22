@@ -174,18 +174,39 @@ podTemplate(
                             check_result "Usage Event Hub Namespace creation"
                         fi
 
-                        # Create Event Hubs
+                        # Plan Event Hub 생성
+                        echo "Creating Plan Event Hub..."
                         az eventhubs eventhub create \
                             --name phone-plan-events-plan \
                             --namespace-name ${userid}-eventhub-plan-ns \
                             --resource-group ${props.resource_group} \
-                            --partition-count 1 || true
+                            --partition-count 1
+                        check_result "Plan Event Hub creation"
 
+                        # Plan Event Hub 생성 확인
+                        echo "Verifying Plan Event Hub..."
+                        az eventhubs eventhub show \
+                            --name phone-plan-events-plan \
+                            --namespace-name ${userid}-eventhub-plan-ns \
+                            --resource-group ${props.resource_group}
+                        check_result "Plan Event Hub verification"
+
+                        # Usage Event Hub 생성
+                        echo "Creating Usage Event Hub..."
                         az eventhubs eventhub create \
                             --name phone-plan-events-usage \
                             --namespace-name ${userid}-eventhub-usage-ns \
                             --resource-group ${props.resource_group} \
-                            --partition-count 1 || true
+                            --partition-count 1
+                        check_result "Usage Event Hub creation"
+
+                        # Usage Event Hub 생성 확인
+                        echo "Verifying Usage Event Hub..."
+                        az eventhubs eventhub show \
+                            --name phone-plan-events-usage \
+                            --namespace-name ${userid}-eventhub-usage-ns \
+                            --resource-group ${props.resource_group}
+                        check_result "Usage Event Hub verification"
 
                         # Get connection strings
                         PLAN_CONNECTION_STRING=\$(az eventhubs namespace authorization-rule keys list \
