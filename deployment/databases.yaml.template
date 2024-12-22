@@ -39,6 +39,8 @@ spec:
             secretKeyRef:
               name: ${userid}-db-credentials
               key: postgres-password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata  # 하위 디렉토리 지정
         ports:
         - containerPort: 5432
         volumeMounts:
