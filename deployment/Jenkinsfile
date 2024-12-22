@@ -27,7 +27,7 @@ def checkError(message) {
 
 podTemplate(
     label: "${PIPELINE_ID}",
-    serviceAccount: 'jenkins',  // serviceAccount 지정
+    serviceAccount: 'jenkins',
     containers: [
         containerTemplate(name: 'gradle', image: 'gradle:jdk17', ttyEnabled: true, command: 'cat'),
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
@@ -40,21 +40,12 @@ podTemplate(
                 envVar(key: 'HOME', value: '/home/jenkins')
             ]
         ),
-        containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl:latest', command: 'cat', ttyEnabled: true),
         containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
     ],
     volumes: [
         emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
         emptyDirVolume(mountPath: '/home/jenkins', memory: false)
-    ],
-    yaml: """
-apiVersion: v1
-kind: Pod
-spec:
-  securityContext:
-    runAsUser: 1000
-    fsGroup: 1000
-"""
+    ]
 ) {
     node(PIPELINE_ID) {
         // Global variables
@@ -83,7 +74,6 @@ spec:
             checkout scm
             props = readProperties file: "deployment/deploy_env_vars"
 
-            // Variables initialization with null checks
             db_namespace = "${userid}-database"
             app_namespace = "${userid}-application"
             imageReg = "${userid}cr.azurecr.io"
@@ -92,46 +82,23 @@ spec:
         }
 
         try {
-            stage("Setup AKS") {
+            stage("Setup AKS and Create Namespaces") {
                 container('azure-cli') {
                     withCredentials([azureServicePrincipal('azure-credentials')]) {
                         sh """
-                            set -e
-                            mkdir -p ~/.azure
-
-                            # Clean up any existing kubeconfig
-                            rm -f ~/.kube/config
-
-                            # Setup kubectl config directory
-                            mkdir -p ~/.kube
-
-                            # Login to Azure
+                            # Azure CLI 로그인
                             az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID
 
-                            # Get AKS credentials with explicit kubeconfig path
-                            az aks get-credentials \
-                                --resource-group ${props.resource_group} \
-                                --name ${userid}-aks \
-                                --file ~/.kube/config \
-                                --overwrite-existing
+                            # AKS 자격증명 가져오기
+                            az aks get-credentials --resource-group ${props.resource_group} --name ${userid}-aks --overwrite-existing
 
-                            # Set KUBECONFIG environment variable
-                            export KUBECONFIG=~/.kube/config
+                            # Namespace 생성
+                            kubectl create namespace ${db_namespace} --dry-run=client -o yaml | kubectl apply -f -
+                            kubectl create namespace ${app_namespace} --dry-run=client -o yaml | kubectl apply -f -
                         """
                     }
                 }
-                checkError("AKS Setup Failed")
-            }
-
-            stage("Create Namespaces") {
-                container('kubectl') {
-                    sh """
-                        set -e
-                        kubectl create namespace ${db_namespace} --dry-run=client -o yaml | kubectl apply -f -
-                        kubectl create namespace ${app_namespace} --dry-run=client -o yaml | kubectl apply -f -
-                    """
-                }
-                checkError("Namespace Creation Failed")
+                checkError("AKS Setup and Namespace Creation Failed")
             }
 
             stage("Setup Event Hub & Storage") {
@@ -245,7 +212,7 @@ spec:
                 storageConnectionString = readFile('storage_connection_string.txt').trim()
 
                 // Create Kubernetes Secrets
-                container('kubectl') {
+                container('azure-cli') {
                     sh """
                         set -e
                         kubectl create secret generic eventhub-secret \
@@ -380,7 +347,7 @@ spec:
             }
 
             stage('Deploy to AKS') {
-                container('kubectl') {
+                container('azure-cli') {
                     sh """
                         set -e
                         # Deploy databases
@@ -417,7 +384,7 @@ spec:
             }
 
             stage('Verify Deployment') {
-                container('kubectl') {
+                container('azure-cli') {
                     sh """
                         set -e
                         echo "Verifying service endpoints..."
