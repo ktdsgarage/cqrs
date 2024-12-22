@@ -24,8 +24,8 @@ data:
   JPA_SHOW_SQL: "false"
 
   # Event Hub 설정
-  EVENT_HUB_PLAN_NS: "${event_hub_ns}"
-  EVENT_HUB_USAGE_NS: "${event_hub_ns}"
+  EVENT_HUB_PLAN_NS: "${userid}-eventhub-plan-ns"
+  EVENT_HUB_USAGE_NS: "${userid}-eventhub-usage-ns"
   EVENT_HUB_PLAN_NAME: "phone-plan-events-plan"
   EVENT_HUB_USAGE_NAME: "phone-plan-events-usage"
 ---
@@ -77,9 +77,9 @@ spec:
               name: eventhub-secret
               key: usage-connection-string
         - name: EVENT_HUB_NAMESPACE_PLAN
-          value: "${event_hub_ns}"
+          value: "${userid}-eventhub-plan-ns"
         - name: EVENT_HUB_NAMESPACE_USAGE
-          value: "${event_hub_ns}"
+          value: "${userid}-eventhub-usage-ns"
         resources:
           requests:
             cpu: ${resources_requests_cpu}
@@ -150,9 +150,9 @@ spec:
               name: eventhub-secret
               key: usage-connection-string
         - name: EVENT_HUB_NAMESPACE_PLAN
-          value: "${event_hub_ns}"
+          value: "${userid}-eventhub-plan-ns"
         - name: EVENT_HUB_NAMESPACE_USAGE
-          value: "${event_hub_ns}"
+          value: "${userid}-eventhub-usage-ns"
         - name: BLOB_CONTAINER
           value: "${userid}-eventhub-checkpoints"
         resources:

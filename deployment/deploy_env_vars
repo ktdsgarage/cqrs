@@ -7,10 +7,6 @@ location=koreacentral
 image_org=telecom
 image_credential=acr-credentials
 
-# Event Hub Settings
-event_hub_ns=${userid}-eventhub-plan-ns  # Plan과 Usage 모두 같은 네임스페이스 사용
-# Event Hub name은 deploy.yaml.template에 직접 지정됨 (phone-plan-events-plan, phone-plan-events-usage)
-
 # Database Settings
 postgres_db=telecomdb  # fixed value
 postgres_user=postgres
