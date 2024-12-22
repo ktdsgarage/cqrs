@@ -14,7 +14,7 @@ podTemplate(
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
         containerTemplate(
             name: 'azure-cli',
-            image: 'mcr.microsoft.com/azure-cli',
+            image: 'mcr.microsoft.com/azure-cli:2.54.0',  // 버전 명시
             command: 'cat',
             ttyEnabled: true,
             envVars: [
@@ -46,6 +46,7 @@ spec:
         def imageTag = getImageTag()
         def imageCredential
         def manifest = "deploy.yaml"
+        def acrToken  // ACR 토큰을 위한 변수
 
         stage("Get Source") {
             checkout scm
@@ -59,6 +60,7 @@ spec:
 
         try {
             stage("Setup AKS & ACR") {
+                // AKS 인증 및 ACR 토큰 획득
                 container('azure-cli') {
                     withCredentials([azureServicePrincipal('azure-credentials')]) {
                         sh """
@@ -66,25 +68,24 @@ spec:
                             az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID
                             az aks get-credentials --resource-group ${props.resource_group} --name ${props.aks_name}
                         """
+                        // ACR 토큰 획득
+                        acrToken = sh(
+                            script: "az acr login --name ${props.acr_name} --expose-token --output tsv --query accessToken",
+                            returnStdout: true
+                        ).trim()
                     }
                 }
 
+                // ACR 로그인
                 container('podman') {
-                    withCredentials([azureServicePrincipal('azure-credentials')]) {
-                        // Get ACR access token using azure-cli
-                        def acrToken = sh(
-                            script: """
-                                az acr login --name ${props.acr_name} --expose-token --output tsv --query accessToken
-                            """,
-                            returnStdout: true
-                        ).trim()
-
-                        // Login to ACR using podman
+                    if (acrToken?.trim()) {
                         sh """
                             podman login ${imageReg} \
                                 --username 00000000-0000-0000-0000-000000000000 \
                                 --password ${acrToken}
                         """
+                    } else {
+                        error "Failed to get ACR token"
                     }
                 }
             }
