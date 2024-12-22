@@ -343,7 +343,6 @@ podTemplate(
                         set -e
                         # Deploy databases
                         kubectl apply -f deployment/databases.yaml
-                        check_result "Database deployment"
 
                         echo "Waiting for database pods to be ready..."
                         kubectl wait --for=condition=ready pod -l "app=postgres,userid=${userid}" -n ${db_namespace} --timeout=600s || true
@@ -357,11 +356,9 @@ podTemplate(
                         sed "s/namespace: .*/namespace: ${app_namespace}/" | \
                         kubectl create -f -
 
-                        check_result "Database credentials copy"
 
                         # Deploy application
                         kubectl apply -f deployment/${manifest}
-                        check_result "Application deployment"
 
                         echo "Waiting for application pods to be ready..."
                         kubectl wait --for=condition=ready pod -l "app=command-service,userid=${userid}" -n ${app_namespace} --timeout=600s || true
