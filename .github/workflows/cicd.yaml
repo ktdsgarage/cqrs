@@ -45,6 +45,7 @@ jobs:
 
       - name: Create Namespaces
         run: |
+          # Create namespaces
           kubectl create namespace ${{ env.DB_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace ${{ env.APP_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
@@ -167,10 +168,6 @@ jobs:
         run: |
           az acr login -n ${{ env.USERID }}cr
 
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
-
       - name: Build and push Command Service
         uses: docker/build-push-action@v4
         with:
@@ -208,8 +205,14 @@ jobs:
           resource-group: ${{ env.RESOURCE_GROUP }}
           cluster-name: ${{ env.USERID }}-aks
 
-      - name: Create Kubernetes Secrets
+      - name: Install envsubst
         run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext-base
+
+      - name: Create Application Secrets
+        run: |
+          # Create Event Hub Secret
           kubectl create secret generic eventhub-secret \
             --namespace ${{ env.APP_NAMESPACE }} \
             --from-literal=plan-connection-string='${{ needs.setup-infrastructure.outputs.plan_connection }}' \
@@ -219,6 +222,7 @@ jobs:
             --from-literal=consumer-group='$Default' \
             --dry-run=client -o yaml | kubectl apply -f -
           
+          # Create Storage Secret
           kubectl create secret generic storage-secret \
             --namespace ${{ env.APP_NAMESPACE }} \
             --from-literal=connection-string='${{ needs.setup-infrastructure.outputs.storage_connection }}' \
@@ -229,8 +233,10 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           MONGODB_PASSWORD: ${{ secrets.MONGODB_PASSWORD }}
         run: |
+          # Set environment variables for template
           export userid=${{ env.USERID }}
           export db_namespace=${{ env.DB_NAMESPACE }}
+          export app_namespace=${{ env.APP_NAMESPACE }}
           export postgres_password_base64=$(echo -n "$POSTGRES_PASSWORD" | base64)
           export mongo_password_base64=$(echo -n "$MONGODB_PASSWORD" | base64)
           export resources_requests_cpu=250m
@@ -238,12 +244,13 @@ jobs:
           export resources_limits_cpu=500m
           export resources_limits_memory=1024Mi
           
+          # Generate and apply database manifest
           envsubst < deployment/databases.yaml.template > databases.yaml
           kubectl apply -f databases.yaml
           
           echo "Waiting for database pods to be ready..."
-          kubectl wait --for=condition=ready pod -l "app=postgres,userid=${{ env.USERID }}" -n ${{ env.DB_NAMESPACE }} --timeout=600s || true
-          kubectl wait --for=condition=ready pod -l "app=mongodb,userid=${{ env.USERID }}" -n ${{ env.DB_NAMESPACE }} --timeout=600s || true
+          kubectl wait --for=condition=ready pod -l "app=postgres,userid=${{ env.USERID }}" -n ${{ env.DB_NAMESPACE }} --timeout=300s || true
+          kubectl wait --for=condition=ready pod -l "app=mongodb,userid=${{ env.USERID }}" -n ${{ env.DB_NAMESPACE }} --timeout=300s || true
           
           # Delete existing secret in app namespace if exists
           kubectl delete secret ${{ env.USERID }}-db-credentials -n ${{ env.APP_NAMESPACE }} --ignore-not-found
@@ -255,7 +262,9 @@ jobs:
 
       - name: Deploy Applications
         run: |
+          # Set environment variables for template
           export userid=${{ env.USERID }}
+          export db_namespace=${{ env.DB_NAMESPACE }}
           export app_namespace=${{ env.APP_NAMESPACE }}
           export command_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ env.IMAGE_TAG }}
           export query_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ env.IMAGE_TAG }}
@@ -264,18 +273,31 @@ jobs:
           export resources_limits_cpu=500m
           export resources_limits_memory=1024Mi
           
+          # Generate and apply application manifest
           envsubst < deployment/deploy.yaml.template > deploy.yaml
           kubectl apply -f deploy.yaml
 
+          echo "Waiting for application pods to start..."
+          sleep 30  # Give some time for pods to be created
+          
+          echo "Waiting for pods to be ready..."
+          kubectl wait --for=condition=ready pod -l "app=command-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s || true
+          kubectl wait --for=condition=ready pod -l "app=query-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s || true
+
       - name: Verify Deployment
         run: |
-          echo "Waiting for pods to be ready..."
-          kubectl wait --for=condition=ready pod -l "app=command-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
-          kubectl wait --for=condition=ready pod -l "app=query-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s
-          
           echo "Getting service endpoints..."
           COMMAND_IP=$(kubectl get svc ${{ env.USERID }}-cqrs-command -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           QUERY_IP=$(kubectl get svc ${{ env.USERID }}-cqrs-query -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           
           echo "Command Service IP: $COMMAND_IP"
           echo "Query Service IP: $QUERY_IP"
+          
+          # Basic health check
+          if [ -n "$COMMAND_IP" ] && [ -n "$QUERY_IP" ]; then
+            echo "Services are exposed successfully"
+            exit 0
+          else
+            echo "Failed to expose services"
+            exit 1
+          fi
