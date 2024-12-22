@@ -155,8 +155,6 @@ spec:
             secretKeyRef:
               name: storage-secret
               key: connection-string
-        - name: STORAGE_CONTAINER_NAME
-          value: "${userid}-eventhub-checkpoints"
         - name: BLOB_CONTAINER_NAME
           value: "${userid}-eventhub-checkpoints"
         resources:
