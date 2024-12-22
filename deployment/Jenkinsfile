@@ -12,13 +12,21 @@ podTemplate(
     containers: [
         containerTemplate(name: 'gradle', image: 'gradle:jdk17', ttyEnabled: true, command: 'cat'),
         containerTemplate(name: 'podman', image: "mgoltzsche/podman", ttyEnabled: true, command: 'cat', privileged: true),
-        containerTemplate(name: 'azure-cli', image: 'mcr.microsoft.com/azure-cli', command: 'cat', ttyEnabled: true),
+        containerTemplate(
+            name: 'azure-cli',
+            image: 'mcr.microsoft.com/azure-cli',
+            command: 'cat',
+            ttyEnabled: true,
+            envVars: [
+                envVar(key: 'HOME', value: '/home/jenkins')  // HOME 디렉토리 설정
+            ]
+        ),
         containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl', command: 'cat', ttyEnabled: true),
         containerTemplate(name: 'envsubst', image: "hiondal/envsubst", command: 'sleep', args: '1h')
     ],
     volumes: [
         emptyDirVolume(mountPath: '/home/gradle/.gradle', memory: false),
-        emptyDirVolume(mountPath: '/workspace', memory: false)  // workspace volume 추가
+        emptyDirVolume(mountPath: '/home/jenkins', memory: false)  // azure cli용 홈 디렉토리
     ],
     yaml: """
 apiVersion: v1
@@ -55,6 +63,7 @@ spec:
                     // Azure CLI를 사용한 AKS 및 ACR 설정
                     withCredentials([azureServicePrincipal('azure-credentials')]) {
                         sh """
+                            mkdir -p ~/.azure  # .azure 디렉토리 생성
                             az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID
                             az aks get-credentials --resource-group ${props.resource_group} --name ${props.aks_name}
                             az acr login --name ${props.acr_name}
