@@ -208,9 +208,6 @@ jobs:
           resource-group: ${{ env.RESOURCE_GROUP }}
           cluster-name: ${{ env.USERID }}-aks
 
-      - name: Grant AKS access to ACR
-        run: |
-          az aks update -n ${{ env.USERID }}-aks -g ${{ env.RESOURCE_GROUP }} --attach-acr ${{ env.USERID }}cr
 
       - name: Get current date
         id: date
