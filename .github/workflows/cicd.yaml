@@ -43,20 +43,14 @@ jobs:
           resource-group: ${{ env.RESOURCE_GROUP }}
           cluster-name: ${{ env.USERID }}-aks
 
-      # AKS-ACR 연결 설정 추가
-      - name: Configure ACR access
+      - name: Create Image Pull Secret
         run: |
-          # AKS의 managed identity 확인
-          CLIENT_ID=$(az aks show -n ${{ env.USERID }}-aks -g ${{ env.RESOURCE_GROUP }} --query identityProfile.kubeletidentity.clientId -o tsv)
-          
-          # ACR의 리소스 ID 확인
-          ACR_ID=$(az acr show -n ${{ env.USERID }}cr -g ${{ env.RESOURCE_GROUP }} --query id -o tsv)
-          
-          # AcrPull 역할 할당
-          az role assignment create \
-            --assignee $CLIENT_ID \
-            --role AcrPull \
-            --scope $ACR_ID
+          kubectl create secret docker-registry acr-secret \
+            --docker-server=${{ env.REGISTRY }} \
+            --docker-username=${{ secrets.ACR_USERNAME }} \
+            --docker-password=${{ secrets.ACR_PASSWORD }} \
+            --namespace=${{ env.APP_NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Create Namespaces
         run: |

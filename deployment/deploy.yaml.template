@@ -46,6 +46,8 @@ spec:
         app: command-service
         userid: ${userid}
     spec:
+      imagePullSecrets:
+      - name: acr-secret
       containers:
       - name: command-service
         image: ${command_image_path}
@@ -119,6 +121,8 @@ spec:
         app: query-service
         userid: ${userid}
     spec:
+      imagePullSecrets:
+      - name: acr-secret
       containers:
       - name: query-service
         image: ${query_image_path}
