@@ -109,14 +109,14 @@ podTemplate(
 
                         # Storage Account Setup
                         STORAGE_EXISTS=\$(az storage account show \
-                            --name ${STORAGE_NAME} \
+                            --name \${STORAGE_NAME} \
                             --resource-group ${props.resource_group} \
                             --query name \
                             --output tsv 2>/dev/null || echo "")
 
                         if [ -z "\${STORAGE_EXISTS}" ]; then
                             az storage account create \
-                                --name ${STORAGE_NAME} \
+                                --name \${STORAGE_NAME} \
                                 --resource-group ${props.resource_group} \
                                 --location ${props.location} \
                                 --sku Standard_LRS
@@ -125,7 +125,7 @@ podTemplate(
 
                         # Get Storage connection string
                         STORAGE_CONNECTION_STRING=\$(az storage account show-connection-string \
-                            --name ${STORAGE_NAME} \
+                            --name \${STORAGE_NAME} \
                             --resource-group ${props.resource_group} \
                             --query connectionString \
                             --output tsv)
