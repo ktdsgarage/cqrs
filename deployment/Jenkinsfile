@@ -5,7 +5,7 @@ properties([
     parameters([
         string(
             name: 'USERID',
-            defaultValue: 'ondal',
+            defaultValue: 'unicorn',
             description: 'User ID for resource naming (lowercase letters and numbers only)'
         )
     ])
