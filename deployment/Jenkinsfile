@@ -111,7 +111,7 @@ podTemplate(
                             --query name \
                             --output tsv 2>/dev/null || echo "")
 
-                        if [ -z "${STORAGE_EXISTS}" ]; then
+                        if [ -z "\${STORAGE_EXISTS}" ]; then
                             az storage account create \
                                 --name ${userid}storage \
                                 --resource-group ${props.resource_group} \
@@ -140,7 +140,7 @@ podTemplate(
                             --resource-group ${props.resource_group} \
                             --query name --output tsv 2>/dev/null || echo "")
 
-                        if [ -z "${PLAN_NS_EXISTS}" ]; then
+                        if [ -z "\${PLAN_NS_EXISTS}" ]; then
                             az eventhubs namespace create \
                                 --name ${userid}-eventhub-plan-ns \
                                 --resource-group ${props.resource_group} \
@@ -155,7 +155,7 @@ podTemplate(
                             --resource-group ${props.resource_group} \
                             --query name --output tsv 2>/dev/null || echo "")
 
-                        if [ -z "${USAGE_NS_EXISTS}" ]; then
+                        if [ -z "\${USAGE_NS_EXISTS}" ]; then
                             az eventhubs namespace create \
                                 --name ${userid}-eventhub-usage-ns \
                                 --resource-group ${props.resource_group} \
@@ -172,7 +172,7 @@ podTemplate(
                             --query name \
                             --output tsv 2>/dev/null || echo "")
 
-                        if [ -z "${EXISTING_PLAN_HUB}" ]; then
+                        if [ -z "\${EXISTING_PLAN_HUB}" ]; then
                             echo "Plan Event Hub 생성 중..."
                             az eventhubs eventhub create \
                                 --name phone-plan-events-plan \
@@ -192,7 +192,7 @@ podTemplate(
                             --query name \
                             --output tsv 2>/dev/null || echo "")
 
-                        if [ -z "${EXISTING_USAGE_HUB}" ]; then
+                        if [ -z "\${EXISTING_USAGE_HUB}" ]; then
                             echo "Usage Event Hub 생성 중..."
                             az eventhubs eventhub create \
                                 --name phone-plan-events-usage \
