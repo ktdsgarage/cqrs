@@ -1,16 +1,5 @@
 def PIPELINE_ID = "cqrs-${env.BUILD_NUMBER}"
 
-// Pipeline Parameters
-properties([
-    parameters([
-        string(
-            name: 'USERID',
-            defaultValue: 'unicorn',
-            description: 'User ID for resource naming (lowercase letters and numbers only)'
-        )
-    ])
-])
-
 // Image 태그 생성 함수
 def getImageTag() {
     def dateFormat = new java.text.SimpleDateFormat('yyyyMMddHHmmss')
@@ -51,7 +40,7 @@ podTemplate(
     node(PIPELINE_ID) {
         // Global variables
         def props
-        def userid = params.USERID  // 파라미터에서 userid 가져오기
+        def userid = "unicorn"
         def db_namespace
         def app_namespace
         def imageReg
