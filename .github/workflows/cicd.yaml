@@ -49,7 +49,7 @@ jobs:
         run: |
           # Storage Account
           az storage account create \
-            --name ${{ env.USERID }}storage20250101 \
+            --name ${{ env.USERID }}storage20241231 \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --location ${{ env.LOCATION }} \
             --sku Standard_LRS \
@@ -57,7 +57,7 @@ jobs:
           
           # Get Storage connection string
           STORAGE_CONNECTION=$(az storage account show-connection-string \
-            --name ${{ env.USERID }}storage20250101 \
+            --name ${{ env.USERID }}storage20241231 \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --query connectionString \
             --output tsv)
