@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: command-config
+  name: cqrs-config
   namespace: ${namespace}
 data:
   APP_NAME: "cqrs"
@@ -23,7 +23,7 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: command-secret
+  name: cqrs-secret
   namespace: ${namespace}
 stringData:
   POSTGRES_USER: "postgres"
@@ -56,9 +56,9 @@ spec:
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
-            name: command-config
+            name: cqrs-config
         - secretRef:
-            name: command-secret
+            name: cqrs-secret
         resources:
           requests:
             cpu: ${resources_requests_cpu}
@@ -102,9 +102,9 @@ spec:
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
-            name: command-config
+            name: cqrs-config
         - secretRef:
-            name: command-secret
+            name: cqrs-secret
         resources:
           requests:
             cpu: ${resources_requests_cpu}
