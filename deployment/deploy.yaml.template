@@ -7,10 +7,10 @@ metadata:
 data:
   APP_NAME: "cqrs"
   SERVER_PORT: "8080"
-  POSTGRES_HOST: "postgres-postgresql-primary-hl"
+  POSTGRES_HOST: "postgres-cqrs-postgresql-primary-hl"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "telecomdb"
-  MONGODB_HOST: "mongodb-headless"
+  MONGODB_HOST: "mongodb-cqrs-headless"
   MONGODB_PORT: "27017"
   MONGODB_DB: "telecomdb"
   JPA_DDL_AUTO: "update"
