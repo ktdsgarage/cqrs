@@ -2,28 +2,28 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: cqrs-config
+  name: command-config
   namespace: ${namespace}
 data:
   APP_NAME: "cqrs"
   SERVER_PORT: "8080"
-  POSTGRES_HOST: "postgres-cqrs-postgresql-primary-hl"
+  POSTGRES_HOST: "postgres-postgresql-primary-hl"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "telecomdb"
-  MONGODB_HOST: "mongodb-cqrs-headless"
+  MONGODB_HOST: "mongodb-headless"
   MONGODB_PORT: "27017"
   MONGODB_DB: "telecomdb"
   JPA_DDL_AUTO: "update"
   JPA_SHOW_SQL: "true"
   EVENT_HUB_PLAN_NAME: "unicorn-name-plan"
   EVENT_HUB_USAGE_NAME: "unicorn-name-usage"
-  BLOB_CONTAINER: "unicorn-checkpoints-cqrs"
+  BLOB_CONTAINER: "unicorn-checkpoints"
 ---
 # Secret
 apiVersion: v1
 kind: Secret
 metadata:
-  name: cqrs-secret
+  name: command-secret
   namespace: ${namespace}
 stringData:
   POSTGRES_USER: "postgres"
@@ -32,7 +32,7 @@ stringData:
   MONGODB_PASSWORD: "Passw0rd"
   EVENT_HUB_PLAN_CONNECTION_STRING: "Endpoint=sb://unicorn-ns-plan.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=Up6AF9bW7QFDm792SBTcCeinfaQxUaRt4+AEhKbtbPc="
   EVENT_HUB_USAGE_CONNECTION_STRING: "Endpoint=sb://unicorn-ns-usage.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=mMSrE3nkjMWpp8OOFywKH1B5Lti06YmiN+AEhJlCmtQ="
-  STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;EndpointSuffix=core.windows.net;AccountName=unicornstoragecqrs;AccountKey=mPSE0mC7gfhRX9uuUMglgk/lvW4IlzkaOnBhtpKiZiRl3uwqyPhZo7/8VtsPs1/xt9IXyGpyIcO0+AStZxG7+A==;BlobEndpoint=https://unicornstoragecqrs.blob.core.windows.net/;FileEndpoint=https://unicornstoragecqrs.file.core.windows.net/;QueueEndpoint=https://unicornstoragecqrs.queue.core.windows.net/;TableEndpoint=https://unicornstoragecqrs.table.core.windows.net/"
+  STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;EndpointSuffix=core.windows.net;AccountName=unicornstorage;AccountKey=mPSE0mC7gfhRX9uuUMglgk/lvW4IlzkaOnBhtpKiZiRl3uwqyPhZo7/8VtsPs1/xt9IXyGpyIcO0+AStZxG7+A==;BlobEndpoint=https://unicornstorage.blob.core.windows.net/;FileEndpoint=https://unicornstorage.file.core.windows.net/;QueueEndpoint=https://unicornstorage.queue.core.windows.net/;TableEndpoint=https://unicornstorage.table.core.windows.net/"
 ---
 # Command Service
 apiVersion: apps/v1
@@ -56,9 +56,9 @@ spec:
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
-            name: cqrs-config
+            name: command-config
         - secretRef:
-            name: cqrs-secret
+            name: command-secret
         resources:
           requests:
             cpu: ${resources_requests_cpu}
@@ -102,9 +102,9 @@ spec:
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
-            name: cqrs-config
+            name: command-config
         - secretRef:
-            name: cqrs-secret
+            name: command-secret
         resources:
           requests:
             cpu: ${resources_requests_cpu}
