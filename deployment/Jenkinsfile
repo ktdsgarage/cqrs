@@ -41,11 +41,6 @@ podTemplate(
         def manifest = "deploy.yaml"
 
         stage("Get Source") {
-            // 이전 stage 이력 삭제
-            currentBuild.rawBuild.getPreviousBuilds().each { build ->
-                build.delete()
-            }
-
             checkout scm
             props = readProperties file: "deployment/deploy_env_vars"
         }
@@ -77,8 +72,8 @@ podTemplate(
 
             stage('Build Container Images') {
                 container('podman') {
-                    def commandImagePath = "${props.registry}/${props.image_org}/cqrs-command"
-                    def queryImagePath = "${props.registry}/${props.image_org}/cqrs-query"
+                    def commandImagePath = "${props.registry}/${props.image_org}/command"
+                    def queryImagePath = "${props.registry}/${props.image_org}/query"
 
                     sh """
                         # Command Service Image
@@ -97,8 +92,8 @@ podTemplate(
 
             stage('Push Container Images') {
                 container('podman') {
-                    def commandImagePath = "${props.registry}/${props.image_org}/cqrs-command"
-                    def queryImagePath = "${props.registry}/${props.image_org}/cqrs-query"
+                    def commandImagePath = "${props.registry}/${props.image_org}/command"
+                    def queryImagePath = "${props.registry}/${props.image_org}/query"
 
                     withCredentials([usernamePassword(
                         credentialsId: "${props.image_credential}",
@@ -123,8 +118,8 @@ podTemplate(
 
             stage('Generate Deployment YAML') {
                 container('envsubst') {
-                    def commandImagePath = "${props.registry}/${props.image_org}/cqrs-command:${imageTag}"
-                    def queryImagePath = "${props.registry}/${props.image_org}/cqrs-query:${imageTag}"
+                    def commandImagePath = "${props.registry}/${props.image_org}/command:${imageTag}"
+                    def queryImagePath = "${props.registry}/${props.image_org}/query:${imageTag}"
 
                     sh """
                         # Export variables for envsubst
@@ -151,10 +146,10 @@ podTemplate(
 
                         # Wait for application pods to be ready
                         echo "Waiting for Command service pods..."
-                        kubectl wait --for=condition=ready pod -l "app=cqrs-command" -n ${props.namespace} --timeout=300s
+                        kubectl wait --for=condition=ready pod -l "app=command" -n ${props.namespace} --timeout=300s
 
                         echo "Waiting for Query service pods..."
-                        kubectl wait --for=condition=ready pod -l "app=cqrs-query" -n ${props.namespace} --timeout=300s
+                        kubectl wait --for=condition=ready pod -l "app=query" -n ${props.namespace} --timeout=300s
                     """
                 }
                 checkError("Deployment to AKS Failed")
@@ -166,8 +161,8 @@ podTemplate(
                         echo "Verifying service endpoints..."
 
                         # Get service IPs
-                        COMMAND_IP=\$(kubectl get svc cqrs-command -n ${props.namespace} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-                        QUERY_IP=\$(kubectl get svc cqrs-query -n ${props.namespace} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+                        COMMAND_IP=\$(kubectl get svc command -n ${props.namespace} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+                        QUERY_IP=\$(kubectl get svc query -n ${props.namespace} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
                         echo "Command Service IP: \$COMMAND_IP"
                         echo "Query Service IP: \$QUERY_IP"
