@@ -77,13 +77,13 @@ podTemplate(
 
                     sh """
                         # Command Service Image
-                        podman build -f deployment/Dockerfile-command \
-                            -t ${commandImagePath}:${imageTag} \
+                        podman build -f deployment/Dockerfile-command \\
+                            -t ${commandImagePath}:${imageTag} \\
                             -t ${commandImagePath}:latest .
 
                         # Query Service Image
-                        podman build -f deployment/Dockerfile-query \
-                            -t ${queryImagePath}:${imageTag} \
+                        podman build -f deployment/Dockerfile-query \\
+                            -t ${queryImagePath}:${imageTag} \\
                             -t ${queryImagePath}:latest .
                     """
                 }
