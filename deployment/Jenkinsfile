@@ -1,5 +1,6 @@
 def PIPELINE_ID = "cqrs-${env.BUILD_NUMBER}"
 
+
 def getImageTag() {
     def dateFormat = new java.text.SimpleDateFormat('yyyyMMddHHmmss')
     def currentDate = new Date()
