@@ -1,323 +1,135 @@
 name: CI/CD Pipeline
 
 on:
-# push, pull request 시 자동 시작하려면 아래 주석을 제거
-#  push:
-#    branches: [ main ]
-#  pull_request:
-#    branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      USERID:
-        description: 'User ID for resource naming'
-        required: true
-        default: 'unicorn'
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 env:
-  USERID: ondal
-  REGISTRY: ondalcr.azurecr.io
-  IMAGE_ORG: telecom
-  DB_NAMESPACE: ondal-database
-  APP_NAMESPACE: ondal-application
-  LOCATION: koreacentral
+  # Application Settings
+  APPLICATION_NAME: pubsub
   RESOURCE_GROUP: tiu-dgga-rg
-  IMAGE_TAG: v${{ github.run_number }}
+  LOCATION: koreacentral
+
+  # Team Settings
+  TEAMID: unicorn
+  NAMESPACE: unicorn-pubsub-ns
+
+  # Container Registry Settings
+  REGISTRY: unicorncr.azurecr.io
+  IMAGE_ORG: telecom
+
+  # Resource Settings
+  RESOURCES_REQUESTS_CPU: 250m
+  RESOURCES_REQUESTS_MEMORY: 512Mi
+  RESOURCES_LIMITS_CPU: 500m
+  RESOURCES_LIMITS_MEMORY: 1024Mi
 
 jobs:
-  setup-infrastructure:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Setup AKS Context
-        uses: azure/aks-set-context@v3
-        with:
-          resource-group: ${{ env.RESOURCE_GROUP }}
-          cluster-name: ${{ env.USERID }}-aks
-
-      - name: Create Namespaces
-        run: |
-          kubectl create namespace ${{ env.DB_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create namespace ${{ env.APP_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Setup Azure Resources
-        run: |
-          # Storage Account
-          az storage account create \
-            --name ${{ env.USERID }}storage20241231 \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --location ${{ env.LOCATION }} \
-            --sku Standard_LRS \
-            --only-show-errors || true
-          
-          # Get Storage connection string
-          STORAGE_CONNECTION=$(az storage account show-connection-string \
-            --name ${{ env.USERID }}storage20241231 \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --query connectionString \
-            --output tsv)
-          
-          # Create container
-          az storage container create \
-            --name ${{ env.USERID }}-eventhub-checkpoints \
-            --connection-string "$STORAGE_CONNECTION" || true
-          
-          # Event Hubs setup
-          az eventhubs namespace create \
-            --name ${{ env.USERID }}-eventhub-plan-ns \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --location ${{ env.LOCATION }} \
-            --sku Basic || true
-          
-          az eventhubs namespace create \
-            --name ${{ env.USERID }}-eventhub-usage-ns \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --location ${{ env.LOCATION }} \
-            --sku Basic || true
-          
-          az eventhubs eventhub create \
-            --name phone-plan-events-plan \
-            --namespace-name ${{ env.USERID }}-eventhub-plan-ns \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --partition-count 1 \
-            --cleanup-policy Delete \
-            --retention-time 24 || true
-          
-          az eventhubs eventhub create \
-            --name phone-plan-events-usage \
-            --namespace-name ${{ env.USERID }}-eventhub-usage-ns \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --partition-count 1 \
-            --cleanup-policy Delete \
-            --retention-time 24 || true
-          
-          # Get connection strings
-          PLAN_CONNECTION=$(az eventhubs namespace authorization-rule keys list \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --namespace-name ${{ env.USERID }}-eventhub-plan-ns \
-            --name RootManageSharedAccessKey \
-            --query primaryConnectionString -o tsv)
-          
-          USAGE_CONNECTION=$(az eventhubs namespace authorization-rule keys list \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --namespace-name ${{ env.USERID }}-eventhub-usage-ns \
-            --name RootManageSharedAccessKey \
-            --query primaryConnectionString -o tsv)
-          
-          # Save connection strings to files
-          echo "$STORAGE_CONNECTION" > storage_connection.txt
-          echo "$PLAN_CONNECTION" > plan_connection.txt
-          echo "$USAGE_CONNECTION" > usage_connection.txt
-          
-          # Debug output
-          echo "Storage connection string length: ${#STORAGE_CONNECTION}"
-          echo "Plan connection string length: ${#PLAN_CONNECTION}"
-          echo "Usage connection string length: ${#USAGE_CONNECTION}"
-
-      - name: Upload Connection Strings
-        uses: actions/upload-artifact@v3
-        with:
-          name: connection-strings
-          path: |
-            storage_connection.txt
-            plan_connection.txt
-            usage_connection.txt
-
-  build:
-    needs: setup-infrastructure
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Build with Gradle
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
+
+      - name: Generate Image Tag
+        id: tag
         run: |
-          chmod +x gradlew
-          ./gradlew command:clean command:build -x test
-          ./gradlew query:clean query:build -x test
+          echo "TAG=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: build-artifacts
-          path: |
-            command/build/libs/*.jar
-            query/build/libs/*.jar
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-  docker-build-push:
-    needs: [setup-infrastructure, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Build Usage Service
+        run: ./gradlew usage:clean usage:build -x test
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: build-artifacts
+      - name: Build Alert Service
+        run: ./gradlew alert:clean alert:build -x test
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Azure Login
+      - name: Log in to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Login to Azure Container Registry
+      - name: Log in to ACR
         run: |
-          az acr login -n ${{ env.USERID }}cr
+          az acr login --name ${{ env.TEAMID }}cr
 
-      - name: Build and push Command Service
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: deployment/Dockerfile-command
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ env.IMAGE_TAG }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:latest
+      - name: Build and Push Usage Service Image
+        run: |
+          docker build -f deployment/Dockerfile-usage \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/usage:${{ env.TAG }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/usage:latest .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/usage:${{ env.TAG }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/usage:latest
 
-      - name: Build and push Query Service
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: deployment/Dockerfile-query
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ env.IMAGE_TAG }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:latest
+      - name: Build and Push Alert Service Image
+        run: |
+          docker build -f deployment/Dockerfile-alert \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/alert:${{ env.TAG }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/alert:latest .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/alert:${{ env.TAG }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/alert:latest
 
-  deploy:
-    needs: [setup-infrastructure, docker-build-push]
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Setup AKS Context
+      - name: Set up kubectl
         uses: azure/aks-set-context@v3
         with:
           resource-group: ${{ env.RESOURCE_GROUP }}
-          cluster-name: ${{ env.USERID }}-aks
+          cluster-name: ${{ env.TEAMID }}-aks
 
-      - name: Download Connection Strings
-        uses: actions/download-artifact@v3
-        with:
-          name: connection-strings
-
-      - name: Create Application Secrets
+      - name: Create namespace if not exists
         run: |
-          # Read connection strings from files
-          STORAGE_CONNECTION=$(cat storage_connection.txt)
-          PLAN_CONNECTION=$(cat plan_connection.txt)
-          USAGE_CONNECTION=$(cat usage_connection.txt)
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Generate deployment manifest
+        run: |
+          # Export variables for envsubst
+          export namespace=${{ env.NAMESPACE }}
+          export usage_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/usage:${{ env.TAG }}
+          export alert_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/alert:${{ env.TAG }}
+          export resources_requests_cpu=${{ env.RESOURCES_REQUESTS_CPU }}
+          export resources_requests_memory=${{ env.RESOURCES_REQUESTS_MEMORY }}
+          export resources_limits_cpu=${{ env.RESOURCES_LIMITS_CPU }}
+          export resources_limits_memory=${{ env.RESOURCES_LIMITS_MEMORY }}
           
-          # Debug output
-          echo "Plan connection string length: ${#PLAN_CONNECTION}"
-          echo "Usage connection string length: ${#USAGE_CONNECTION}"
+          # Install envsubst
+          sudo apt-get update && sudo apt-get install -y gettext-base
           
-          if [ -z "$PLAN_CONNECTION" ] || [ -z "$USAGE_CONNECTION" ]; then
-            echo "Error: Event Hub connection strings are empty"
+          # Generate deployment file
+          envsubst < deployment/deploy.yaml.template > deployment/deploy.yaml
+
+      - name: Deploy to AKS
+        run: |
+          kubectl apply -f deployment/deploy.yaml
+          
+          echo "Waiting for Usage service pods..."
+          kubectl wait --for=condition=ready pod -l "app=usage" -n ${{ env.NAMESPACE }} --timeout=300s
+          
+          echo "Waiting for Alert service pods..."
+          kubectl wait --for=condition=ready pod -l "app=alert" -n ${{ env.NAMESPACE }} --timeout=300s
+
+      - name: Verify Deployment
+        run: |
+          echo "Verifying service endpoints..."
+          
+          # Get service IPs
+          USAGE_IP=$(kubectl get svc usage-svc -n ${{ env.NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          ALERT_IP=$(kubectl get svc alert-svc -n ${{ env.NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          echo "Usage Service IP: $USAGE_IP"
+          echo "Alert Service IP: $ALERT_IP"
+          
+          if [ -z "$USAGE_IP" ] || [ -z "$ALERT_IP" ]; then
+            echo "Error: Service IPs not available"
             exit 1
           fi
-          
-          # Create Event Hub Secret
-          kubectl create secret generic eventhub-secret \
-            --namespace ${{ env.APP_NAMESPACE }} \
-            --from-literal=plan-connection-string="$PLAN_CONNECTION" \
-            --from-literal=usage-connection-string="$USAGE_CONNECTION" \
-            --from-literal=plan-hub-name="phone-plan-events-plan" \
-            --from-literal=usage-hub-name="phone-plan-events-usage" \
-            --from-literal=consumer-group='$Default' \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          # Create Storage Secret
-          kubectl create secret generic storage-secret \
-            --namespace ${{ env.APP_NAMESPACE }} \
-            --from-literal=connection-string="$STORAGE_CONNECTION" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          # Verify secrets
-          echo "Verifying Event Hub secret..."
-          kubectl get secret eventhub-secret -n ${{ env.APP_NAMESPACE }} -o yaml
-
-      - name: Deploy Databases
-        env:
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          MONGODB_PASSWORD: ${{ secrets.MONGODB_PASSWORD }}
-        run: |
-          export userid=${{ env.USERID }}
-          export db_namespace=${{ env.DB_NAMESPACE }}
-          export app_namespace=${{ env.APP_NAMESPACE }}
-          export postgres_password_base64=$(echo -n "$POSTGRES_PASSWORD" | base64)
-          export mongo_password_base64=$(echo -n "$MONGODB_PASSWORD" | base64)
-          export resources_requests_cpu=250m
-          export resources_requests_memory=512Mi
-          export resources_limits_cpu=500m
-          export resources_limits_memory=1024Mi
-          
-          envsubst < deployment/databases.yaml.template > databases.yaml
-          kubectl apply -f databases.yaml
-          
-          echo "Waiting for database pods to be ready..."
-          kubectl wait --for=condition=ready pod -l "app=postgres,userid=${{ env.USERID }}" -n ${{ env.DB_NAMESPACE }} --timeout=300s || true
-          kubectl wait --for=condition=ready pod -l "app=mongodb,userid=${{ env.USERID }}" -n ${{ env.DB_NAMESPACE }} --timeout=300s || true
-          
-          kubectl delete secret ${{ env.USERID }}-db-credentials -n ${{ env.APP_NAMESPACE }} --ignore-not-found
-          
-          kubectl get secret ${{ env.USERID }}-db-credentials -n ${{ env.DB_NAMESPACE }} -o yaml | \
-          sed "s/namespace: .*/namespace: ${{ env.APP_NAMESPACE }}/" | \
-          kubectl create -f -
-
-      - name: Deploy Applications
-        run: |
-          export userid=${{ env.USERID }}
-          export db_namespace=${{ env.DB_NAMESPACE }}
-          export app_namespace=${{ env.APP_NAMESPACE }}
-          export command_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-command:${{ env.IMAGE_TAG }}
-          export query_image_path=${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/cqrs-query:${{ env.IMAGE_TAG }}
-          export resources_requests_cpu=250m
-          export resources_requests_memory=512Mi
-          export resources_limits_cpu=500m
-          export resources_limits_memory=1024Mi
-          
-          envsubst < deployment/deploy.yaml.template > deploy.yaml
-          kubectl apply -f deploy.yaml
-          
-          echo "Waiting for application pods to start..."
-          sleep 30
-          
-          echo "Waiting for pods to be ready..."
-          kubectl wait --for=condition=ready pod -l "app=command-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s || true
-          kubectl wait --for=condition=ready pod -l "app=query-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --timeout=300s || true
-
-      - name: Verify Deployment and Show Logs
-        run: |
-          echo "Getting service endpoints..."
-          COMMAND_IP=$(kubectl get svc ${{ env.USERID }}-cqrs-command -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          QUERY_IP=$(kubectl get svc ${{ env.USERID }}-cqrs-query -n ${{ env.APP_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          
-          echo "Command Service IP: $COMMAND_IP"
-          echo "Query Service IP: $QUERY_IP"
-          
-          echo "Showing recent logs from command service..."
-          kubectl logs -l "app=command-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --tail=100 || true
-          
-          echo "Showing recent logs from query service..."
-          kubectl logs -l "app=query-service,userid=${{ env.USERID }}" -n ${{ env.APP_NAMESPACE }} --tail=100 || true
