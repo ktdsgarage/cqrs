@@ -1,0 +1,107 @@
+# ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cqrs-config
+data:
+  APP_NAME: "cqrs"
+  SERVER_PORT: "8080"
+  POSTGRES_HOST: "postgres-cqrs-postgresql-primary-hl"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "telecomdb"
+  MONGODB_HOST: "mongodb-cqrs-headless"
+  MONGODB_PORT: "27017"
+  MONGODB_DB: "telecomdb"
+  JPA_DDL_AUTO: "update"
+  JPA_SHOW_SQL: "true"
+  EVENT_HUB_PLAN_NAME: "unicorn-name-plan"
+  EVENT_HUB_USAGE_NAME: "unicorn-name-usage"
+  BLOB_CONTAINER: "unicorn-checkpoints-cqrs"
+---
+# Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cqrs-secret
+stringData:
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "Passw0rd"
+  MONGODB_USER: "root" 
+  MONGODB_PASSWORD: "Passw0rd"
+  EVENT_HUB_PLAN_CONNECTION_STRING: "Endpoint=sb://unicorn-ns-plan.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=Up6AF9bW7QFDm792SBTcCeinfaQxUaRt4+AEhKbtbPc="
+  EVENT_HUB_USAGE_CONNECTION_STRING: "Endpoint=sb://unicorn-ns-usage.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=mMSrE3nkjMWpp8OOFywKH1B5Lti06YmiN+AEhJlCmtQ="
+  STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;EndpointSuffix=core.windows.net;AccountName=unicornstoragecqrs;AccountKey=mPSE0mC7gfhRX9uuUMglgk/lvW4IlzkaOnBhtpKiZiRl3uwqyPhZo7/8VtsPs1/xt9IXyGpyIcO0+AStZxG7+A==;BlobEndpoint=https://unicornstoragecqrs.blob.core.windows.net/;FileEndpoint=https://unicornstoragecqrs.file.core.windows.net/;QueueEndpoint=https://unicornstoragecqrs.queue.core.windows.net/;TableEndpoint=https://unicornstoragecqrs.table.core.windows.net/"
+---
+# Command Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cqrs-command
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cqrs-command
+  template:
+    metadata:
+      labels:
+        app: cqrs-command
+    spec:
+      containers:
+      - name: command
+        image: unicorncr.azurecr.io/telecom/command:latest
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: cqrs-config
+        - secretRef:
+            name: cqrs-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cqrs-command
+spec:
+  selector:
+    app: cqrs-command
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: LoadBalancer
+---
+# Query Service  
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cqrs-query
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cqrs-query
+  template:
+    metadata:
+      labels:
+        app: cqrs-query
+    spec:
+      containers:
+      - name: query
+        image: unicorncr.azurecr.io/telecom/query:latest
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:  
+            name: cqrs-config
+        - secretRef:
+            name: cqrs-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cqrs-query  
+spec:
+  selector:
+    app: cqrs-query
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: LoadBalancer

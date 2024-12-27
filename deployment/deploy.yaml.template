@@ -1,85 +1,64 @@
+# ConfigMap
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ${userid}-cqrs-config
-  namespace: ${app_namespace}
+  name: cqrs-config
+  namespace: ${namespace}
 data:
   APP_NAME: "cqrs"
   SERVER_PORT: "8080"
-
-  # PostgreSQL 설정
-  POSTGRES_HOST: "${userid}-postgres.${db_namespace}.svc.cluster.local"
+  POSTGRES_HOST: "postgres-cqrs-postgresql-primary-hl"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "telecomdb"
-  POSTGRES_USER: "postgres"
-
-  # MongoDB 설정
-  MONGODB_HOST: "${userid}-mongodb.${db_namespace}.svc.cluster.local"
+  MONGODB_HOST: "mongodb-cqrs-headless"
   MONGODB_PORT: "27017"
   MONGODB_DB: "telecomdb"
-  MONGODB_USER: "root"
-
-  # JPA 설정
   JPA_DDL_AUTO: "update"
-  JPA_SHOW_SQL: "false"
-
-  # Event Hub 설정
-  EVENT_HUB_PLAN_NS: "${userid}-eventhub-plan-ns"
-  EVENT_HUB_USAGE_NS: "${userid}-eventhub-usage-ns"
-  EVENT_HUB_PLAN_NAME: "phone-plan-events-plan"
-  EVENT_HUB_USAGE_NAME: "phone-plan-events-usage"
+  JPA_SHOW_SQL: "true"
+  EVENT_HUB_PLAN_NAME: "unicorn-name-plan"
+  EVENT_HUB_USAGE_NAME: "unicorn-name-usage"
+  BLOB_CONTAINER: "unicorn-checkpoints-cqrs"
 ---
+# Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cqrs-secret
+  namespace: ${namespace}
+stringData:
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "Passw0rd"
+  MONGODB_USER: "root"
+  MONGODB_PASSWORD: "Passw0rd"
+  EVENT_HUB_PLAN_CONNECTION_STRING: "Endpoint=sb://unicorn-ns-plan.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=Up6AF9bW7QFDm792SBTcCeinfaQxUaRt4+AEhKbtbPc="
+  EVENT_HUB_USAGE_CONNECTION_STRING: "Endpoint=sb://unicorn-ns-usage.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=mMSrE3nkjMWpp8OOFywKH1B5Lti06YmiN+AEhJlCmtQ="
+  STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;EndpointSuffix=core.windows.net;AccountName=unicornstoragecqrs;AccountKey=mPSE0mC7gfhRX9uuUMglgk/lvW4IlzkaOnBhtpKiZiRl3uwqyPhZo7/8VtsPs1/xt9IXyGpyIcO0+AStZxG7+A==;BlobEndpoint=https://unicornstoragecqrs.blob.core.windows.net/;FileEndpoint=https://unicornstoragecqrs.file.core.windows.net/;QueueEndpoint=https://unicornstoragecqrs.queue.core.windows.net/;TableEndpoint=https://unicornstoragecqrs.table.core.windows.net/"
+---
+# Command Service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${userid}-cqrs-command
-  namespace: ${app_namespace}
+  name: command
+  namespace: ${namespace}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: command-service
-      userid: ${userid}
+      app: command
   template:
     metadata:
       labels:
-        app: command-service
-        userid: ${userid}
+        app: command
     spec:
       containers:
-      - name: command-service
+      - name: command
         image: ${command_image_path}
         imagePullPolicy: Always
-        ports:
-        - containerPort: 8080
         envFrom:
         - configMapRef:
-            name: ${userid}-cqrs-config
-        env:
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ${userid}-db-credentials
-              key: postgres-password
-        - name: STORAGE_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: storage-secret
-              key: connection-string
-        - name: EVENT_HUB_PLAN_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: plan-connection-string
-        - name: EVENT_HUB_USAGE_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: usage-connection-string
-        - name: EVENT_HUB_NAMESPACE_PLAN
-          value: "${userid}-eventhub-plan-ns"
-        - name: EVENT_HUB_NAMESPACE_USAGE
-          value: "${userid}-eventhub-usage-ns"
+            name: cqrs-config
+        - secretRef:
+            name: cqrs-secret
         resources:
           requests:
             cpu: ${resources_requests_cpu}
@@ -91,70 +70,41 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${userid}-cqrs-command
-  namespace: ${app_namespace}
+  name: command
+  namespace: ${namespace}
 spec:
   selector:
-    app: command-service
-    userid: ${userid}
+    app: command
   ports:
   - port: 8080
     targetPort: 8080
   type: LoadBalancer
 ---
+# Query Service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${userid}-cqrs-query
-  namespace: ${app_namespace}
+  name: query
+  namespace: ${namespace}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: query-service
-      userid: ${userid}
+      app: query
   template:
     metadata:
       labels:
-        app: query-service
-        userid: ${userid}
+        app: query
     spec:
       containers:
-      - name: query-service
+      - name: query
         image: ${query_image_path}
         imagePullPolicy: Always
-        ports:
-        - containerPort: 8080
         envFrom:
         - configMapRef:
-            name: ${userid}-cqrs-config
-        env:
-        - name: MONGODB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ${userid}-db-credentials
-              key: mongo-password
-        - name: STORAGE_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: storage-secret
-              key: connection-string
-        - name: EVENT_HUB_PLAN_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: plan-connection-string
-        - name: EVENT_HUB_USAGE_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: eventhub-secret
-              key: usage-connection-string
-        - name: EVENT_HUB_NAMESPACE_PLAN
-          value: "${userid}-eventhub-plan-ns"
-        - name: EVENT_HUB_NAMESPACE_USAGE
-          value: "${userid}-eventhub-usage-ns"
-        - name: BLOB_CONTAINER
-          value: "${userid}-eventhub-checkpoints"
+            name: cqrs-config
+        - secretRef:
+            name: cqrs-secret
         resources:
           requests:
             cpu: ${resources_requests_cpu}
@@ -166,12 +116,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${userid}-cqrs-query
-  namespace: ${app_namespace}
+  name: query
+  namespace: ${namespace}
 spec:
   selector:
-    app: query-service
-    userid: ${userid}
+    app: query
   ports:
   - port: 8080
     targetPort: 8080

@@ -3,17 +3,14 @@ application_name=cqrs
 resource_group=tiu-dgga-rg
 location=koreacentral
 
-# Image Settings
+# Team Settings
+teamid=unicorn
+namespace=unicorn-ns
+
+# Container Registry Settings
+registry=unicorncr.azurecr.io
 image_org=telecom
 image_credential=acr-credentials
-
-# Database Settings
-postgres_db=telecomdb  # fixed value
-postgres_user=postgres
-postgres_password=postgres
-mongodb_db=telecomdb  # fixed value
-mongodb_user=root
-mongodb_password=Passw0rd
 
 # Resource Settings
 resources_requests_cpu=250m
