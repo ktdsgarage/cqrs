@@ -10,7 +10,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
  */
 @Document(collection = "phone_plan_views")
 @Data
-public class PhonePlanView {
+public class UsageView {
     @Id
     private String id;
     

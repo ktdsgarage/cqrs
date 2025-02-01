@@ -1,5 +1,7 @@
 #!/bin/bash
 
+SHARED_PREFIX="dg0100"  #공유자원 Prefix: 실습 시 'tiu-dgga' 변경 필요
+
 # ===========================================
 # CQRS Pattern 실습환경 구성 스크립트
 # ===========================================
@@ -15,7 +17,7 @@ print_usage() {
    리소스 이름이 중복되지 않도록 userid를 prefix로 사용합니다.
 
 예제:
-   $0 gappa     # gappa-cqrs-aks 등의 리소스가 생성됨
+   $0 dg0100
 EOF
 }
 
@@ -61,14 +63,14 @@ setup_environment() {
 
    USERID=$1
    NAME="${USERID}-cqrs"
-   RESOURCE_GROUP="tiu-dgga-rg"
+   RESOURCE_GROUP="${SHARED_PREFIX}-rg"
    LOCATION="koreacentral"
    ACR_NAME="${USERID}cr"
    AKS_NAME="${USERID}-aks"
 
    # Namespace에 userid 추가
-   DB_NAMESPACE="${USERID}-database"
-   APP_NAMESPACE="${USERID}-application"
+   DB_NAMESPACE="${USERID}-cqrs"
+   APP_NAMESPACE="${USERID}-cqrs"
    APP_PORT=8080
 
    # Secret 이름에 userid 추가
@@ -82,11 +84,28 @@ setup_environment() {
    BLOB_CONTAINER="${USERID}-eventhub-checkpoints"
    PLAN_EVENT_HUB_NS="${USERID}-eventhub-plan-ns"
    USAGE_EVENT_HUB_NS="${USERID}-eventhub-usage-ns"
-   EVENT_HUB_NAME="phone-plan-events"
-   PLAN_HUB_NAME="${EVENT_HUB_NAME}-plan"
-   USAGE_HUB_NAME="${EVENT_HUB_NAME}-usage"
+   PLAN_HUB_NAME="mq-plan"
+   USAGE_HUB_NAME="mq-usage"
 
    LOG_FILE="deployment_${NAME}.log"
+}
+
+# 애플리케이션 정리
+cleanup_application() {
+   log "기존 애플리케이션 정리 중..."
+
+   # 기존 ConfigMap, Secret 지우기
+   kubectl delete cm $NAME-config -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
+   kubectl delete secret eventhub-secret -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
+   kubectl delete secret storage-secret -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
+
+   # 기존 deployment 삭제
+   kubectl delete deployment -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
+   kubectl delete deployment -n $APP_NAMESPACE $NAME-query 2>/dev/null || true
+
+   # deployment가 완전히 삭제될 때까지 대기
+   kubectl wait --for=delete deployment/$NAME-command -n $APP_NAMESPACE --timeout=60s 2>/dev/null || true
+   kubectl wait --for=delete deployment/$NAME-query -n $APP_NAMESPACE --timeout=60s 2>/dev/null || true
 }
 
 # AKS 자격증명 가져오기
@@ -95,37 +114,6 @@ setup_aks() {
     az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME
     check_error "AKS 자격 증명 가져오기 실패"
 }
-
-# ACR pull 권한 설정
-setup_acr_permission() {
-    log "ACR pull 권한 확인 중..."
-
-    # AKS의 service principal 확인
-    SP_ID=$(az aks show \
-        --name $AKS_NAME \
-        --resource-group $RESOURCE_GROUP \
-        --query servicePrincipalProfile.clientId -o tsv)
-    log "SP_ID-->${SP_ID}"
-    if [ "${SP_ID}" = "msi" ]; then
-        log "AKS가 Managed Identity를 사용하고 있습니다."
-        # ACR 권한이 이미 있다고 가정하고 진행
-        log "ACR pull 권한이 이미 설정되어 있다고 가정합니다."
-    else
-        log "Service Principal을 사용하는 AKS입니다. ACR 권한을 확인합니다..."
-        # ACR ID 가져오기
-        ACR_ID=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query "id" -o tsv)
-        check_error "ACR ID 조회 실패"
-
-        # AKS에 ACR pull 권한 부여
-        log "ACR pull 권한 설정 중..."
-        az aks update \
-            --name $AKS_NAME \
-            --resource-group $RESOURCE_GROUP \
-            --attach-acr $ACR_ID 2>/dev/null || true
-        check_error "ACR pull 권한 부여 실패"
-    fi
-}
-
 
 # 애플리케이션 빌드
 build_application() {
@@ -460,66 +448,6 @@ setup_databases() {
    kubectl wait --for=condition=ready pod -l "app=mongodb,userid=$USERID" -n $DB_NAMESPACE --timeout=120s
 }
 
-# 애플리케이션 정리
-cleanup_application() {
-   log "기존 애플리케이션 정리 중..."
-
-   # 기존 ConfigMap, Secret 지우기
-   kubectl delete cm $NAME-config -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
-   kubectl delete secret eventhub-secret -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
-   kubectl delete secret storage-secret -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
-
-   # 기존 deployment 삭제
-   kubectl delete deployment -n $APP_NAMESPACE $NAME-command 2>/dev/null || true
-   kubectl delete deployment -n $APP_NAMESPACE $NAME-query 2>/dev/null || true
-
-   # deployment가 완전히 삭제될 때까지 대기
-   kubectl wait --for=delete deployment/$NAME-command -n $APP_NAMESPACE --timeout=60s 2>/dev/null || true
-   kubectl wait --for=delete deployment/$NAME-query -n $APP_NAMESPACE --timeout=60s 2>/dev/null || true
-}
-
-#Event Hub가 사용하는 Blob Storage 설정
-setup_storage() {
-    log "Storage Account 및 Blob Container 설정 중..."
-
-    # Storage Account가 없으면 생성
-    STORAGE_EXISTS=$(az storage account show \
-        --name $STORAGE_ACCOUNT \
-        --resource-group $RESOURCE_GROUP \
-        --query name \
-        --output tsv 2>/dev/null)
-
-    if [ -z "$STORAGE_EXISTS" ]; then
-        az storage account create \
-            --name $STORAGE_ACCOUNT \
-            --resource-group $RESOURCE_GROUP \
-            --location $LOCATION \
-            --sku Standard_LRS
-        check_error "Storage Account 생성 실패"
-    fi
-
-    # 연결 문자열 얻기
-    STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
-        --name $STORAGE_ACCOUNT \
-        --resource-group $RESOURCE_GROUP \
-        --query connectionString \
-        --output tsv)
-    check_error "Storage 연결 문자열 가져오기 실패"
-
-    # Blob Container 생성
-    az storage container create \
-        --name $BLOB_CONTAINER \
-        --connection-string "$STORAGE_CONNECTION_STRING" \
-        2>/dev/null || true
-
-    # Secret으로 저장
-    kubectl create secret generic storage-secret \
-        --namespace $APP_NAMESPACE \
-        --from-literal=connection-string="$STORAGE_CONNECTION_STRING" \
-        2>/dev/null || true
-    check_error "Storage Secret 저장 실패"
-}
-
 # Event Hub 네임스페이스 및 이벤트 허브 생성
 setup_event_hub() {
    log "Event Hub 확인 중..."
@@ -632,6 +560,48 @@ setup_event_hub() {
    check_error "Event Hub Secret 저장 실패"
 
    log "Event Hub 설정 완료"
+}
+
+#Event Hub가 사용하는 Blob Storage 설정
+setup_storage() {
+    log "Storage Account 및 Blob Container 설정 중..."
+
+    # Storage Account가 없으면 생성
+    STORAGE_EXISTS=$(az storage account show \
+        --name $STORAGE_ACCOUNT \
+        --resource-group $RESOURCE_GROUP \
+        --query name \
+        --output tsv 2>/dev/null)
+
+    if [ -z "$STORAGE_EXISTS" ]; then
+        az storage account create \
+            --name $STORAGE_ACCOUNT \
+            --resource-group $RESOURCE_GROUP \
+            --location $LOCATION \
+            --sku Standard_LRS
+        check_error "Storage Account 생성 실패"
+    fi
+
+    # 연결 문자열 얻기
+    STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
+        --name $STORAGE_ACCOUNT \
+        --resource-group $RESOURCE_GROUP \
+        --query connectionString \
+        --output tsv)
+    check_error "Storage 연결 문자열 가져오기 실패"
+
+    # Blob Container 생성
+    az storage container create \
+        --name $BLOB_CONTAINER \
+        --connection-string "$STORAGE_CONNECTION_STRING" \
+        2>/dev/null || true
+
+    # Secret으로 저장
+    kubectl create secret generic storage-secret \
+        --namespace $APP_NAMESPACE \
+        --from-literal=connection-string="$STORAGE_CONNECTION_STRING" \
+        2>/dev/null || true
+    check_error "Storage Secret 저장 실패"
 }
 
 deploy_application() {
@@ -862,39 +832,39 @@ print_completion_message() {
 
 # 메인 실행 함수
 main() {
-   log "CQRS 패턴 실습환경 구성을 시작합니다..."
+	log "CQRS 패턴 실습환경 구성을 시작합니다..."
 
-   # 사전 체크
-   check_prerequisites
+	# 사전 체크
+	check_prerequisites
 
-   # 환경 변수 설정
-   setup_environment "$1"
-   cleanup_application
+	# 환경 변수 설정
+	setup_environment "$1"
+	cleanup_application
 
-   # AKS 권한 취득
-   setup_aks
+	# AKS 권한 취득
+	setup_aks
 
-   # ACR pull 권한 설정
-   setup_acr_permission
+	# ACR pull 권한 설정
+	setup_acr_permission
 
-   # 리소스 생성 및 애플리케이션 배포
-   build_application
-   push_images
+	# 리소스 생성 및 애플리케이션 배포
+	build_application
+	push_images
 
-   # Database 배포
-   setup_databases
+	# Database 배포
+	setup_databases
 
-    # Event Hub 설정 (데이터베이스 다음, 애플리케이션 배포 전)
-    setup_event_hub
-    setup_storage
+	# Event Hub 설정 (데이터베이스 다음, 애플리케이션 배포 전)
+	setup_event_hub
+	setup_storage
 
-    # 기존 애플리케이션 정리 후 재배포
-    deploy_application
+	# 기존 애플리케이션 정리 후 재배포
+	deploy_application
 
-    log "모든 리소스가 성공적으로 생성되었습니다."
+	log "모든 리소스가 성공적으로 생성되었습니다."
 
-    # 결과 출력
-    print_completion_message
+	# 결과 출력
+	print_completion_message
 }
 
 # 스크립트 시작

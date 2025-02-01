@@ -5,9 +5,9 @@ import com.azure.messaging.eventhubs.models.ErrorContext;
 import com.azure.messaging.eventhubs.models.EventContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telecom.cqrs.common.event.PhonePlanEvent;
-import com.telecom.cqrs.query.domain.PhonePlanView;
+import com.telecom.cqrs.query.domain.UsageView;
 import com.telecom.cqrs.query.exception.EventProcessingException;
-import com.telecom.cqrs.query.repository.PhonePlanViewRepository;
+import com.telecom.cqrs.query.repository.UsageViewRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
@@ -21,7 +21,7 @@ import java.util.function.Consumer;
 @Slf4j
 @Service
 public class PhonePlanEventHandler implements Consumer<EventContext> {
-    private final PhonePlanViewRepository phonePlanViewRepository;
+    private final UsageViewRepository usageViewRepository;
     private final ObjectMapper objectMapper;
     private final RetryTemplate retryTemplate;
     private final AtomicLong eventsProcessed = new AtomicLong(0);
@@ -29,10 +29,10 @@ public class PhonePlanEventHandler implements Consumer<EventContext> {
     private EventProcessorClient eventProcessorClient;
 
     public PhonePlanEventHandler(
-            PhonePlanViewRepository phonePlanViewRepository,
+            UsageViewRepository usageViewRepository,
             ObjectMapper objectMapper,
             RetryTemplate retryTemplate) {
-        this.phonePlanViewRepository = phonePlanViewRepository;
+        this.usageViewRepository = usageViewRepository;
         this.objectMapper = objectMapper;
         this.retryTemplate = retryTemplate;
     }
@@ -99,9 +99,9 @@ public class PhonePlanEventHandler implements Consumer<EventContext> {
     private void processUserEvent(PhonePlanEvent event) {
         try {
             retryTemplate.execute(context -> {
-                PhonePlanView view = getOrCreatePhonePlanView(event.getUserId());
+                UsageView view = getOrCreatePhonePlanView(event.getUserId());
                 updateViewFromEvent(view, event);
-                PhonePlanView savedView = phonePlanViewRepository.save(view);
+                UsageView savedView = usageViewRepository.save(view);
                 log.info("***** Plan event processed result - userId: {}, planName: {}, dataAllowance: {}, callMinutes: {}, messageCount: {}",
                         savedView.getUserId(), savedView.getPlanName(), savedView.getDataAllowance(),
                         savedView.getCallMinutes(), savedView.getMessageCount());  // 추가
@@ -114,17 +114,17 @@ public class PhonePlanEventHandler implements Consumer<EventContext> {
         }
     }
 
-    private PhonePlanView getOrCreatePhonePlanView(String userId) {
-        PhonePlanView view = phonePlanViewRepository.findByUserId(userId);
+    private UsageView getOrCreatePhonePlanView(String userId) {
+        UsageView view = usageViewRepository.findByUserId(userId);
         if (view == null) {
-            view = new PhonePlanView();
+            view = new UsageView();
             view.setUserId(userId);
-            log.debug("Creating new PhonePlanView for userId={}", userId);
+            log.debug("Creating new UsageView for userId={}", userId);
         }
         return view;
     }
 
-    private void updateViewFromEvent(PhonePlanView view, PhonePlanEvent event) {
+    private void updateViewFromEvent(UsageView view, PhonePlanEvent event) {
         view.setPlanName(event.getPlanName());
         view.setDataAllowance(event.getDataAllowance());
         view.setCallMinutes(event.getCallMinutes());

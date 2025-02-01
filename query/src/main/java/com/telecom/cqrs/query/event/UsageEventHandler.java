@@ -5,9 +5,9 @@ import com.azure.messaging.eventhubs.models.ErrorContext;
 import com.azure.messaging.eventhubs.models.EventContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telecom.cqrs.common.event.UsageUpdatedEvent;
-import com.telecom.cqrs.query.domain.PhonePlanView;
+import com.telecom.cqrs.query.domain.UsageView;
 import com.telecom.cqrs.query.exception.EventProcessingException;
-import com.telecom.cqrs.query.repository.PhonePlanViewRepository;
+import com.telecom.cqrs.query.repository.UsageViewRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
@@ -21,7 +21,7 @@ import java.util.function.Consumer;
 @Slf4j
 @Service
 public class UsageEventHandler implements Consumer<EventContext> {
-    private final PhonePlanViewRepository phonePlanViewRepository;
+    private final UsageViewRepository usageViewRepository;
     private final ObjectMapper objectMapper;
     private final RetryTemplate retryTemplate;
     private final AtomicLong eventsProcessed = new AtomicLong(0);
@@ -29,10 +29,10 @@ public class UsageEventHandler implements Consumer<EventContext> {
     private EventProcessorClient eventProcessorClient;
 
     public UsageEventHandler(
-            PhonePlanViewRepository phonePlanViewRepository,
+            UsageViewRepository usageViewRepository,
             ObjectMapper objectMapper,
             RetryTemplate retryTemplate) {
-        this.phonePlanViewRepository = phonePlanViewRepository;
+        this.usageViewRepository = usageViewRepository;
         this.objectMapper = objectMapper;
         this.retryTemplate = retryTemplate;
     }
@@ -73,7 +73,7 @@ public class UsageEventHandler implements Consumer<EventContext> {
 
             UsageUpdatedEvent event = parseEvent(eventData);
             if (event != null) {
-                processUserEvent(event);
+                processUsageEvent(event);
                 eventsProcessed.incrementAndGet();
                 eventContext.updateCheckpoint();
                 log.debug("Usage event processed successfully: userId={}", event.getUserId());
@@ -94,13 +94,13 @@ public class UsageEventHandler implements Consumer<EventContext> {
         }
     }
 
-    private void processUserEvent(UsageUpdatedEvent event) {
+    private void processUsageEvent(UsageUpdatedEvent event) {
         try {
             retryTemplate.execute(context -> {
-                PhonePlanView view = getPhonePlanView(event.getUserId());
+                UsageView view = getUsageView(event.getUserId());
                 if (view != null) {
                     updateViewFromEvent(view, event);
-                    PhonePlanView savedView = phonePlanViewRepository.save(view);
+                    UsageView savedView = usageViewRepository.save(view);
                     log.info("***** Usage event processed result - userId: {}, dataUsage: {}, callUsage: {}, messageUsage: {}",
                             savedView.getUserId(), savedView.getDataUsage(),
                             savedView.getCallUsage(), savedView.getMessageUsage());  // 추가
@@ -114,15 +114,15 @@ public class UsageEventHandler implements Consumer<EventContext> {
         }
     }
 
-    private PhonePlanView getPhonePlanView(String userId) {
-        PhonePlanView view = phonePlanViewRepository.findByUserId(userId);
+    private UsageView getUsageView(String userId) {
+        UsageView view = usageViewRepository.findByUserId(userId);
         if (view == null) {
-            log.warn("No PhonePlanView found for userId={}, skipping usage update", userId);
+            log.warn("No UsageView found for userId={}, skipping usage update", userId);
         }
         return view;
     }
 
-    private void updateViewFromEvent(PhonePlanView view, UsageUpdatedEvent event) {
+    private void updateViewFromEvent(UsageView view, UsageUpdatedEvent event) {
         if (event.getDataUsage() != null) {
             view.setDataUsage(event.getDataUsage());
         }

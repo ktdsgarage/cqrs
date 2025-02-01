@@ -1,5 +1,7 @@
 #!/bin/bash
 
+SHARED_PREFIX="dg0100"  #공유자원 Prefix: 실습 시 'tiu-dgga' 변경 필요
+
 # ===========================================
 # CQRS Pattern 실습환경 정리 스크립트
 # ===========================================
@@ -14,7 +16,7 @@ print_usage() {
     CQRS 패턴 실습을 위해 생성한 리소스를 정리합니다.
 
 예제:
-    $0 gappa     # gappa-cqrs 관련 리소스 정리
+    $0 dg0100
 EOF
 }
 
@@ -28,18 +30,17 @@ log() {
 setup_environment() {
     USERID=$1
     NAME="${USERID}-cqrs"
-    RESOURCE_GROUP="tiu-dgga-rg"
-    DB_NAMESPACE="${USERID}-database"
-    APP_NAMESPACE="${USERID}-application"
+    RESOURCE_GROUP="${SHARED_PREFIX}-rg"
+    DB_NAMESPACE="${USERID}-cqrs"
+    APP_NAMESPACE="${USERID}-cqrs"
 
     # Event Hub 관련 환경변수
     STORAGE_ACCOUNT="${USERID}storage"
     BLOB_CONTAINER="${USERID}-eventhub-checkpoints"
     PLAN_EVENT_HUB_NS="${USERID}-eventhub-plan-ns"
     USAGE_EVENT_HUB_NS="${USERID}-eventhub-usage-ns"
-    EVENT_HUB_NAME="phone-plan-events"
-    PLAN_HUB_NAME="${EVENT_HUB_NAME}-plan"
-    USAGE_HUB_NAME="${EVENT_HUB_NAME}-usage"
+    PLAN_HUB_NAME="mq-plan"
+   USAGE_HUB_NAME="mq-usage"
 }
 
 # 데이터베이스 정리

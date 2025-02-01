@@ -8,7 +8,7 @@ import lombok.Data;
  */
 @Data
 @Schema(description = "요금제 조회 응답")
-public class PhonePlanQueryResponse {
+public class UsageQueryResponse {
     @Schema(description = "사용자 ID", example = "user123")
     private String userId;
     
