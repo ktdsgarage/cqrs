@@ -83,8 +83,8 @@ setup_environment() {
    BLOB_CONTAINER="${USERID}-eventhub-checkpoints"
    PLAN_EVENT_HUB_NS="${USERID}-eventhub-plan-ns"
    USAGE_EVENT_HUB_NS="${USERID}-eventhub-usage-ns"
-   PLAN_HUB_NAME="mq-plan"
-   USAGE_HUB_NAME="mq-usage"
+   PLAN_HUB_NAME="${USERID}-mq-plan"
+   USAGE_HUB_NAME="${USERID}-mq-usage"
 
    LOG_FILE="deployment_${NAME}.log"
 }
