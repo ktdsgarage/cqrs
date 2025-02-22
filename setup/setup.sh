@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SHARED_PREFIX="dg0100"  #공유자원 Prefix: 실습 시 'tiu-dgga' 변경 필요
+RESOURCE_GROUP="ictcoe-edu" #az group list -o table
 
 # ===========================================
 # CQRS Pattern 실습환경 구성 스크립트
@@ -63,7 +63,6 @@ setup_environment() {
 
    USERID=$1
    NAME="${USERID}-cqrs"
-   RESOURCE_GROUP="${SHARED_PREFIX}-rg"
    LOCATION="koreacentral"
    ACR_NAME="${USERID}cr"
    AKS_NAME="${USERID}-aks"

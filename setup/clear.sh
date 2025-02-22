@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SHARED_PREFIX="dg0100"  #공유자원 Prefix: 실습 시 'tiu-dgga' 변경 필요
+RESOURCE_GROUP="ictcoe-edu" #az group list -o table
 
 # ===========================================
 # CQRS Pattern 실습환경 정리 스크립트
@@ -26,11 +26,24 @@ log() {
     echo "[$timestamp] $1"
 }
 
+# 리소스 삭제 전 확인
+confirm() {
+    read -p "모든 리소스를 삭제하시겠습니까? (y/N) " response
+    case "$response" in
+        [yY][eE][sS]|[yY])
+            return 0
+            ;;
+        *)
+            echo "작업을 취소합니다."
+            exit 1
+            ;;
+    esac
+}
+
 # 환경 변수 설정
 setup_environment() {
     USERID=$1
     NAME="${USERID}-cqrs"
-    RESOURCE_GROUP="${SHARED_PREFIX}-rg"
     DB_NAMESPACE="${USERID}-cqrs"
     APP_NAMESPACE="${USERID}-cqrs"
 
@@ -179,6 +192,9 @@ cleanup_namespaces() {
 
 # 메인 실행 함수
 main() {
+    # 사전 체크
+    confirm
+
     log "CQRS 패턴 실습환경 정리를 시작합니다..."
 
     # 환경 변수 설정
